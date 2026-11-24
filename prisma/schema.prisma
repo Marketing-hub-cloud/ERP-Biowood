@@ -1,0 +1,144 @@
+// Biowood ERP — Prisma schema
+// เฟส 1: Foundation (ผู้ใช้, กลุ่มสิทธิ์, audit log, เลขที่เอกสาร, ข้อมูลบริษัท)
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────── ผู้ใช้งาน ─────────────────────────
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique // เก็บเป็นตัวพิมพ์เล็กเสมอ
+  passwordHash String
+  firstName    String
+  lastName     String
+  department   String?
+  position     String?
+  avatarKey    String?
+  isAdmin      Boolean    @default(false)
+  status       UserStatus @default(ACTIVE)
+  statusNote   String?
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  createdById  String?
+
+  groups    UserGroup[]
+  auditLogs AuditLog[] @relation("AuditActor")
+
+  @@map("users")
+}
+
+// ───────────────────────── กำหนดสิทธิ์ ─────────────────────────
+
+model PermissionGroup {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions GroupPermission[]
+  members     UserGroup[]
+
+  @@map("permission_groups")
+}
+
+model GroupPermission {
+  groupId   String
+  menuKey   String // ดูรายการเมนูใน src/lib/menu.ts
+  canView   Boolean @default(false)
+  canCreate Boolean @default(false)
+  canEdit   Boolean @default(false)
+  canDelete Boolean @default(false)
+  canCancel Boolean @default(false)
+
+  group PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, menuKey])
+  @@map("group_permissions")
+}
+
+model UserGroup {
+  userId  String
+  groupId String
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([userId, groupId])
+  @@index([groupId])
+  @@map("user_groups")
+}
+
+// ───────────────────────── Audit log ─────────────────────────
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  STATUS_CHANGE
+  APPROVE
+  REJECT
+  CANCEL
+}
+
+model AuditLog {
+  id         String      @id @default(cuid())
+  actorId    String?
+  entityType String
+  entityId   String
+  action     AuditAction
+  before     Json?
+  after      Json?
+  changes    Json? // { field: [old, new] }
+  note       String?
+  ip         String?
+  createdAt  DateTime    @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+  @@map("audit_logs")
+}
+
+// ───────────────────────── เลขที่เอกสาร ─────────────────────────
+
+model DocumentCounter {
+  prefix  String
+  dateKey String // YYMMDD ตามเวลา Asia/Bangkok
+  lastSeq Int    @default(0)
+
+  @@id([prefix, dateKey])
+  @@map("document_counters")
+}
+
+// ───────────────────────── ข้อมูลบริษัท ─────────────────────────
+
+model CompanySetting {
+  id        Int      @id @default(1) // singleton
+  nameTh    String
+  nameEn    String?
+  address   String?
+  taxId     String?  @db.VarChar(13)
+  branch    String?
+  phone     String?
+  email     String?
+  website   String?
+  logoKey   String?
+  updatedAt DateTime @updatedAt
+
+  @@map("company_settings")
+}

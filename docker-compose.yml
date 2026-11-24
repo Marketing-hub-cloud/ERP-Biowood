@@ -1,0 +1,33 @@
+# Dev environment
+# - ตอนนี้ใช้ Supabase เป็นฐานข้อมูล: `docker compose up app` (อ่าน DATABASE_URL จาก .env)
+# - ถ้าต้องการ Postgres ในเครื่อง: `docker compose --profile localdb up`
+#   แล้วตั้ง DATABASE_URL=DIRECT_URL=postgresql://biowood:biowood@postgres:5432/biowood
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    env_file: .env
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    command: sh -c "npx prisma migrate deploy && npm run dev"
+
+  postgres:
+    image: postgres:17
+    profiles: ["localdb"]
+    environment:
+      POSTGRES_USER: biowood
+      POSTGRES_PASSWORD: biowood
+      POSTGRES_DB: biowood
+      TZ: Asia/Bangkok
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
