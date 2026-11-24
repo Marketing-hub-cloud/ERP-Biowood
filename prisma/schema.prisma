@@ -54,6 +54,7 @@ model User {
   rtCancelled     PurchaseReturn[]       @relation("RtCancelledBy")
   approvalSteps   ApprovalStepApprover[] @relation("ApprovalStepUser")
   approvalActions ApprovalAction[]       @relation("ApprovalActionActor")
+  notifications   Notification[]
 
   @@map("users")
 }
@@ -930,4 +931,77 @@ model NoteTemplate {
 
   @@index([module])
   @@map("note_templates")
+}
+
+// ───────────────────────── เฟส 6: แจ้งเตือน (ในระบบ + LINE) ─────────────────────────
+
+/// แจ้งเตือนในระบบ (ไอคอนกระดิ่ง)
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  module    String // "purchase" | "engineer"
+  title     String
+  body      String?
+  link      String?
+  docType   String?
+  docId     String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+/// ตั้งค่าการแจ้งเตือนต่อโมดูล (token อยู่ใน env เท่านั้น)
+model NotificationSetting {
+  module        String   @id
+  lineEnabled   Boolean  @default(false)
+  lineGroupId   String?
+  lineGroupName String?
+  updatedById   String?
+  updatedAt     DateTime @updatedAt
+
+  @@map("notification_settings")
+}
+
+/// กลุ่ม LINE ที่บอทเข้าร่วม (บันทึกจาก webhook)
+model LineGroup {
+  groupId  String    @id
+  name     String?
+  joinedAt DateTime  @default(now())
+  leftAt   DateTime?
+
+  @@map("line_groups")
+}
+
+enum DeliveryStatus {
+  PENDING // รอส่ง
+  SENDING // กำลังส่ง (worker จองไว้)
+  SENT // ส่งแล้ว
+  FAILED // ส่งไม่สำเร็จ (ครบจำนวนครั้ง หรือผิดถาวร)
+}
+
+/// คิวส่ง LINE (outbox) — เขียนใน transaction เดียวกับเอกสาร แล้ว worker ส่งทีหลัง
+model NotificationDelivery {
+  id            String         @id @default(cuid())
+  channel       String         @default("LINE")
+  module        String
+  target        String // groupId
+  message       String
+  status        DeliveryStatus @default(PENDING)
+  attempts      Int            @default(0)
+  nextAttemptAt DateTime       @default(now())
+  lockedAt      DateTime?
+  lastError     String?
+  sentAt        DateTime?
+  refType       String?
+  refId         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([createdAt])
+  @@map("notification_deliveries")
 }

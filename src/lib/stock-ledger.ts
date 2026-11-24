@@ -106,7 +106,7 @@ export async function postReceipt(tx: TxClient, receiptId: string, actorId: stri
     });
   }
   await tx.goodsReceipt.update({ where: { id: r.id }, data: { status: "POSTED", postedAt: now, postedById: actorId, updatedById: actorId } });
-  if (r.purchaseOrderId) await recomputeOrders(tx, [r.purchaseOrderId]);
+  if (r.purchaseOrderId) await recomputeOrders(tx, [r.purchaseOrderId], actorId);
   return { serials: r.lines.reduce((n, l) => n + l.serials.length, 0) };
 }
 
@@ -148,7 +148,7 @@ export async function cancelReceipt(tx: TxClient, receiptId: string, actorId: st
     where: { id: receiptId },
     data: { status: "CANCELLED", cancelledAt: now, cancelledById: actorId, cancelReason: reason, updatedById: actorId },
   });
-  if (cancelled.purchaseOrderId) await recomputeOrders(tx, [cancelled.purchaseOrderId]);
+  if (cancelled.purchaseOrderId) await recomputeOrders(tx, [cancelled.purchaseOrderId], actorId);
   return { wasPosted: status === "POSTED" };
 }
 
@@ -193,7 +193,7 @@ export async function postIssue(tx: TxClient, issueId: string, actorId: string) 
     })),
   });
   await tx.goodsIssue.update({ where: { id: doc.id }, data: { status: "POSTED", postedAt: now, postedById: actorId, updatedById: actorId } });
-  if (doc.purchaseReturnId) await recomputeReturns(tx, [doc.purchaseReturnId]);
+  if (doc.purchaseReturnId) await recomputeReturns(tx, [doc.purchaseReturnId], actorId);
 }
 
 export async function cancelIssue(tx: TxClient, issueId: string, actorId: string, reason: string) {
@@ -225,7 +225,7 @@ export async function cancelIssue(tx: TxClient, issueId: string, actorId: string
     where: { id: issueId },
     data: { status: "CANCELLED", cancelledAt: now, cancelledById: actorId, cancelReason: reason, updatedById: actorId },
   });
-  if (cancelled.purchaseReturnId) await recomputeReturns(tx, [cancelled.purchaseReturnId]);
+  if (cancelled.purchaseReturnId) await recomputeReturns(tx, [cancelled.purchaseReturnId], actorId);
   return { wasPosted: status === "POSTED" };
 }
 

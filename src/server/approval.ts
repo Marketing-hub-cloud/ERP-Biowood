@@ -17,6 +17,8 @@ import {
   type PurchaseStatus,
 } from "@/lib/approval";
 import type { CurrentUser } from "@/lib/session";
+import { enqueuePurchaseEvent } from "@/lib/notifications";
+import { kickNotificationWorker } from "@/lib/notification-worker";
 import type { Prisma } from "@/generated/prisma/client";
 
 export const ENTITY_APPROVAL_SETTING = "ApprovalSetting";
@@ -183,6 +185,18 @@ export async function runApproval(
           updatedById: actor.id,
         });
       }
+      const kindEvent = action === "submit" ? "submitted" : action === "reject" ? "rejected" : t.status === "PENDING" ? "step_approved" : "approved";
+      await enqueuePurchaseEvent(tx, {
+        kind: kindEvent,
+        docType,
+        docId: id,
+        docNo: doc.docNo,
+        status: t.status,
+        actorId: actor.id,
+        stepNo: action === "approve" ? doc.currentStep : null,
+        nextStep: t.status === "PENDING" ? t.currentStep : null,
+        comment,
+      });
       const round = action === "submit" ? doc.approvalRound + 1 : doc.approvalRound;
       const kind = action === "submit" ? "SUBMIT" : action === "approve" ? "APPROVE" : "REJECT";
       await recordApprovalAction(tx, { docType, docId: id, round, stepNo, action: kind, actorId: actor.id, comment });
@@ -203,7 +217,10 @@ export async function runApproval(
       return { docNo: doc.docNo, status: t.status };
     },
     { maxWait: 10_000, timeout: 30_000 },
-  );
+  ).then((r) => {
+    kickNotificationWorker();
+    return r;
+  });
 }
 
 /** ประวัติการอนุมัติของเอกสาร */

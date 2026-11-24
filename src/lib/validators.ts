@@ -507,3 +507,21 @@ export const noteTemplateSchema = z.object({
   isActive: z.boolean().optional().default(true),
 });
 export type NoteTemplateInput = z.input<typeof noteTemplateSchema>;
+
+// ───────────────────────── เฟส 6: แจ้งเตือน ─────────────────────────
+
+export const notificationSettingSchema = z
+  .object({
+    module: z.enum(["purchase", "engineer"]),
+    lineEnabled: z.boolean(),
+    lineGroupId: z
+      .string()
+      .trim()
+      .optional()
+      .nullable()
+      .transform((v) => (v ? v : null))
+      .refine((v) => v === null || /^[A-Za-z0-9]{10,64}$/.test(v), "groupId ไม่ถูกต้อง (เช่น C1234...)"),
+  })
+  .refine((d) => !d.lineEnabled || d.lineGroupId, { message: "กรุณาระบุกลุ่ม LINE", path: ["lineGroupId"] });
+
+export const markReadSchema = z.object({ ids: z.array(z.string()).max(200).optional(), all: z.boolean().optional() });

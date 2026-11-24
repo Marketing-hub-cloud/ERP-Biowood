@@ -3,15 +3,17 @@ import { prisma, type TxClient } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
 import { ApiError } from "@/lib/errors";
 import { allocateDocNumber, DOC_PREFIXES } from "@/lib/doc-number";
-import { formatDate, formatNumber, fullName } from "@/lib/format";
+import { formatDate, formatNumber } from "@/lib/format";
 import { isApprovedLike, STATUS_LABELS } from "@/lib/approval";
 import { dateOnly, sumQty, toMilli } from "@/lib/stock-rules";
 import { lockRows, poLineReceived, poLineReturned, rtLineIssued } from "@/lib/purchase-status";
 import type { PurchaseReturnData } from "@/lib/validators";
 import type { CurrentUser } from "@/lib/session";
+import { enqueuePurchaseEvent } from "@/lib/notifications";
+import { kickNotificationWorker } from "@/lib/notification-worker";
 import type { Prisma } from "@/generated/prisma/client";
 import { approvalHistory, recordApprovalAction, runApproval } from "./approval";
-import { lockDraft, notifyPurchaseEvent, PURCHASE_TX } from "./purchase-common";
+import { lockDraft, PURCHASE_TX } from "./purchase-common";
 
 export const ENTITY_RT = "PurchaseReturn";
 
@@ -83,10 +85,11 @@ export async function createReturn(actor: CurrentUser, d: PurchaseReturnData, ip
         lines: { create: lineRows(d, order) },
       },
     });
+    await enqueuePurchaseEvent(tx, { kind: "created", docType: "RT", docId: r.id, docNo: r.docNo, status: "DRAFT", actorId: actor.id });
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_RT, entityId: r.id, action: "CREATE", after: await snapshot(tx, r.id), ip });
     return r;
   }, PURCHASE_TX);
-  notifyPurchaseEvent({ docType: "RT", docId: doc.id, docNo: doc.docNo, event: "created", actorName: fullName(actor) });
+  kickNotificationWorker();
   return doc;
 }
 
@@ -122,12 +125,12 @@ export async function returnApproval(actor: CurrentUser, id: string, action: "su
     },
     ip,
   );
-  notifyPurchaseEvent({ docType: "RT", docId: id, docNo: res.docNo, event: action, actorName: fullName(actor) });
+  kickNotificationWorker();
   return res;
 }
 
 export async function cancelReturn(actor: CurrentUser, id: string, reason: string, ip: string | null) {
-  const docNo = await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
     const [row] = await tx.$queryRaw<{ status: string; docNo: string; approvalRound: number }[]>`
       SELECT status::text AS status, "docNo", "approvalRound" FROM purchase_returns WHERE id = ${id} FOR UPDATE`;
     if (!row) throw new ApiError(404, "ไม่พบใบส่งคืน");
@@ -140,10 +143,11 @@ export async function cancelReturn(actor: CurrentUser, id: string, reason: strin
       data: { status: "CANCELLED", currentStep: null, cancelledAt: new Date(), cancelledById: actor.id, cancelReason: reason, updatedById: actor.id },
     });
     await recordApprovalAction(tx, { docType: "RT", docId: id, round: row.approvalRound, stepNo: null, action: "CANCEL", actorId: actor.id, comment: reason });
+    await enqueuePurchaseEvent(tx, { kind: "cancelled", docType: "RT", docId: id, docNo: row.docNo, status: "CANCELLED", actorId: actor.id, comment: reason });
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_RT, entityId: id, action: "CANCEL", before, after: await snapshot(tx, id), note: `ยกเลิก: ${reason}`, ip });
     return row.docNo;
   }, PURCHASE_TX);
-  notifyPurchaseEvent({ docType: "RT", docId: id, docNo, event: "cancelled", actorName: fullName(actor) });
+  kickNotificationWorker();
 }
 
 export async function getReturnDetail(id: string) {

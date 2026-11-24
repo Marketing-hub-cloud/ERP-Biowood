@@ -1,6 +1,7 @@
 // จำนวนสะสมของเอกสารจัดซื้อ (คำนวณจากเอกสารที่อ้างอิง ไม่เก็บเป็นตัวเลข) + คำนวณสถานะ PARTIAL/COMPLETED ใหม่
 // ทุกฟังก์ชันรับ tx — เรียกใน transaction เดียวกับการบันทึกเอกสารที่เกี่ยวข้อง
 import { fulfillmentStatus, type PurchaseStatus } from "./approval";
+import { enqueuePurchaseEvent } from "./notifications";
 import { toMilli } from "./stock-rules";
 import type { DbClient, TxClient } from "./db";
 
@@ -62,38 +63,47 @@ export async function rtLineIssued(db: Db, returnLineIds: string[]): Promise<Map
 const APPROVED_LIKE: PurchaseStatus[] = ["APPROVED", "PARTIAL", "COMPLETED"];
 
 /** คำนวณสถานะ PR ใหม่ (สั่งซื้อแล้วบางส่วน / สั่งซื้อแล้ว) */
-export async function recomputeRequests(tx: TxClient, requestIds: string[]) {
+export async function recomputeRequests(tx: TxClient, requestIds: string[], actorId: string | null = null) {
   const ids = [...new Set(requestIds)];
   if (!ids.length) return;
   const docs = await tx.purchaseRequest.findMany({ where: { id: { in: ids }, status: { in: APPROVED_LIKE } }, include: { lines: true } });
   for (const d of docs) {
     const done = await prLineOrdered(tx, d.lines.map((l) => l.id));
     const status = fulfillmentStatus(d.lines.map((l) => ({ qtyMilli: toMilli(l.quantity.toString()), doneMilli: toMilli(done.get(l.id) ?? 0) })));
-    if (status !== d.status) await tx.purchaseRequest.update({ where: { id: d.id }, data: { status } });
+    if (status !== d.status) {
+      await tx.purchaseRequest.update({ where: { id: d.id }, data: { status } });
+      await enqueuePurchaseEvent(tx, { kind: "status", docType: "PR", docId: d.id, docNo: d.docNo, status, actorId });
+    }
   }
 }
 
 /** คำนวณสถานะ PO ใหม่ (นำเข้าแล้วบางส่วน / นำเข้าแล้ว) */
-export async function recomputeOrders(tx: TxClient, orderIds: string[]) {
+export async function recomputeOrders(tx: TxClient, orderIds: string[], actorId: string | null = null) {
   const ids = [...new Set(orderIds)];
   if (!ids.length) return;
   const docs = await tx.purchaseOrder.findMany({ where: { id: { in: ids }, status: { in: APPROVED_LIKE } }, include: { lines: true } });
   for (const d of docs) {
     const done = await poLineReceived(tx, d.lines.map((l) => l.id));
     const status = fulfillmentStatus(d.lines.map((l) => ({ qtyMilli: toMilli(l.quantity.toString()), doneMilli: toMilli(done.get(l.id) ?? 0) })));
-    if (status !== d.status) await tx.purchaseOrder.update({ where: { id: d.id }, data: { status } });
+    if (status !== d.status) {
+      await tx.purchaseOrder.update({ where: { id: d.id }, data: { status } });
+      await enqueuePurchaseEvent(tx, { kind: "status", docType: "PO", docId: d.id, docNo: d.docNo, status, actorId });
+    }
   }
 }
 
 /** คำนวณสถานะใบส่งคืนใหม่ (ส่งคืนแล้วบางส่วน / ส่งคืนแล้ว) */
-export async function recomputeReturns(tx: TxClient, returnIds: string[]) {
+export async function recomputeReturns(tx: TxClient, returnIds: string[], actorId: string | null = null) {
   const ids = [...new Set(returnIds)];
   if (!ids.length) return;
   const docs = await tx.purchaseReturn.findMany({ where: { id: { in: ids }, status: { in: APPROVED_LIKE } }, include: { lines: true } });
   for (const d of docs) {
     const done = await rtLineIssued(tx, d.lines.map((l) => l.id));
     const status = fulfillmentStatus(d.lines.map((l) => ({ qtyMilli: toMilli(l.quantity.toString()), doneMilli: toMilli(done.get(l.id) ?? 0) })));
-    if (status !== d.status) await tx.purchaseReturn.update({ where: { id: d.id }, data: { status } });
+    if (status !== d.status) {
+      await tx.purchaseReturn.update({ where: { id: d.id }, data: { status } });
+      await enqueuePurchaseEvent(tx, { kind: "status", docType: "RT", docId: d.id, docNo: d.docNo, status, actorId });
+    }
   }
 }
 

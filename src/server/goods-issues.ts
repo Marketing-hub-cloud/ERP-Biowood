@@ -10,6 +10,7 @@ import { rtLineIssued } from "@/lib/purchase-status";
 import { pathLabel, type TreeNode } from "@/lib/tree";
 import type { IssueData } from "@/lib/validators";
 import type { CurrentUser } from "@/lib/session";
+import { kickNotificationWorker } from "@/lib/notification-worker";
 import type { Prisma } from "@/generated/prisma/client";
 
 export const ENTITY_ISSUE = "GoodsIssue";
@@ -172,6 +173,12 @@ const header = (d: IssueData) => ({
 
 /** สร้างใบนำออก — post = true จะนำออกทันทีใน transaction เดียวกัน (ไม่สำเร็จ = ไม่บันทึกอะไรเลย) */
 export async function createIssue(actor: CurrentUser, d: IssueData, post: boolean, ip: string | null) {
+  const doc = await createIssueTx(actor, d, post, ip);
+  if (post) kickNotificationWorker();
+  return doc;
+}
+
+async function createIssueTx(actor: CurrentUser, d: IssueData, post: boolean, ip: string | null) {
   return prisma.$transaction(async (tx) => {
     const refs = await assertRefs(tx, d);
     const docNo = await allocateDocNumber(tx, DOC_PREFIXES.GOODS_ISSUE);
@@ -206,9 +213,15 @@ async function postAndAudit(tx: TxClient, actor: CurrentUser, id: string, ip: st
 
 export async function postIssueDoc(actor: CurrentUser, id: string, ip: string | null) {
   await prisma.$transaction((tx) => postAndAudit(tx, actor, id, ip), STOCK_TX);
+  kickNotificationWorker();
 }
 
 export async function cancelIssueDoc(actor: CurrentUser, id: string, reason: string, ip: string | null) {
+  await cancelIssueTx(actor, id, reason, ip);
+  kickNotificationWorker();
+}
+
+async function cancelIssueTx(actor: CurrentUser, id: string, reason: string, ip: string | null) {
   await prisma.$transaction(async (tx) => {
     const before = await snapshot(tx, id);
     const res = await cancelIssue(tx, id, actor.id, reason);

@@ -9,9 +9,11 @@ import { dateOnly, sumQty, toMilli } from "@/lib/stock-rules";
 import { prLineOrdered } from "@/lib/purchase-status";
 import type { PurchaseRequestData } from "@/lib/validators";
 import type { CurrentUser } from "@/lib/session";
+import { enqueuePurchaseEvent } from "@/lib/notifications";
+import { kickNotificationWorker } from "@/lib/notification-worker";
 import type { Prisma } from "@/generated/prisma/client";
 import { approvalHistory, recordApprovalAction, runApproval } from "./approval";
-import { assertProducts, assertWarehouse, lockDraft, notifyPurchaseEvent, PURCHASE_TX } from "./purchase-common";
+import { assertProducts, assertWarehouse, lockDraft, PURCHASE_TX } from "./purchase-common";
 
 export const ENTITY_PR = "PurchaseRequest";
 
@@ -64,10 +66,11 @@ export async function createRequest(actor: CurrentUser, d: PurchaseRequestData, 
     await assertRefs(tx, d);
     const docNo = await allocateDocNumber(tx, DOC_PREFIXES.PURCHASE_REQUEST);
     const r = await tx.purchaseRequest.create({ data: { ...header(d), docNo, createdById: actor.id, lines: { create: lineRows(d) } } });
+    await enqueuePurchaseEvent(tx, { kind: "created", docType: "PR", docId: r.id, docNo: r.docNo, status: "DRAFT", actorId: actor.id });
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_PR, entityId: r.id, action: "CREATE", after: await snapshot(tx, r.id), ip });
     return r;
   }, PURCHASE_TX);
-  notifyPurchaseEvent({ docType: "PR", docId: doc.id, docNo: doc.docNo, event: "created", actorName: fullName(actor) });
+  kickNotificationWorker();
   return doc;
 }
 
@@ -100,12 +103,12 @@ export async function requestApproval(actor: CurrentUser, id: string, action: "s
     },
     ip,
   );
-  notifyPurchaseEvent({ docType: "PR", docId: id, docNo: res.docNo, event: action, actorName: fullName(actor) });
+  kickNotificationWorker();
   return res;
 }
 
 export async function cancelRequest(actor: CurrentUser, id: string, reason: string, ip: string | null) {
-  const docNo = await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
     const [row] = await tx.$queryRaw<{ status: string; docNo: string; approvalRound: number }[]>`
       SELECT status::text AS status, "docNo", "approvalRound" FROM purchase_requests WHERE id = ${id} FOR UPDATE`;
     if (!row) throw new ApiError(404, "ไม่พบใบขอซื้อ");
@@ -124,10 +127,11 @@ export async function cancelRequest(actor: CurrentUser, id: string, reason: stri
       data: { status: "CANCELLED", currentStep: null, cancelledAt: new Date(), cancelledById: actor.id, cancelReason: reason, updatedById: actor.id },
     });
     await recordApprovalAction(tx, { docType: "PR", docId: id, round: row.approvalRound, stepNo: null, action: "CANCEL", actorId: actor.id, comment: reason });
+    await enqueuePurchaseEvent(tx, { kind: "cancelled", docType: "PR", docId: id, docNo: row.docNo, status: "CANCELLED", actorId: actor.id, comment: reason });
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_PR, entityId: id, action: "CANCEL", before, after: await snapshot(tx, id), note: `ยกเลิก: ${reason}`, ip });
     return row.docNo;
   }, PURCHASE_TX);
-  notifyPurchaseEvent({ docType: "PR", docId: id, docNo, event: "cancelled", actorName: fullName(actor) });
+  kickNotificationWorker();
 }
 
 /** ข้อมูลหน้าเอกสาร: รายการ + จำนวนสั่งซื้อแล้ว + ประวัติอนุมัติ + PO ที่อ้างอิง */

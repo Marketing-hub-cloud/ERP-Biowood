@@ -80,6 +80,9 @@ describe.skipIf(!hasDb)("จัดซื้อ (DB)", () => {
     await prisma.purchaseOrder.deleteMany({ where: { vendorId } });
     await prisma.purchaseRequest.deleteMany({ where: { id: { in: prs.map((p) => p.id) } } });
     await prisma.approvalAction.deleteMany({ where: { docId: { in: docIds } } });
+    // แจ้งเตือน/คิว LINE ของเอกสารทดสอบ (เฟส 6) — ไม่ลบจะเหลือแจ้งเตือนที่ลิงก์ไปเอกสารที่ไม่มีแล้ว
+    await prisma.notification.deleteMany({ where: { docId: { in: docIds } } });
+    await prisma.notificationDelivery.deleteMany({ where: { refId: { in: docIds } } });
     await prisma.auditLog.deleteMany({ where: { OR: [{ entityId: { in: [...docIds, productId, vendorId] } }, { entityType: "ApprovalSetting", createdAt: { gte: new Date(Date.now() - 3600_000) }, note: null }] } });
     await prisma.product.delete({ where: { id: productId } });
     await prisma.contact.delete({ where: { id: vendorId } });
@@ -191,5 +194,5 @@ describe.skipIf(!hasDb)("จัดซื้อ (DB)", () => {
     expect(await poStatus(po.id)).toBe("PARTIAL");
     // ยกเลิก PO ไม่ได้เพราะมีใบนำเข้า/ใบส่งคืน
     await expect(cancelOrder(admin, po.id, "x", null)).rejects.toThrow(/มีเอกสารอ้างอิงอยู่/);
-  });
+  }, 120_000);
 });

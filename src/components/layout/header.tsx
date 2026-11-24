@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Bell, KeyRound, LogOut, Menu, UserRound } from "lucide-react";
+import { KeyRound, LogOut, Menu, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -17,10 +17,12 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import type { MenuSection } from "@/lib/menu";
 import { BrandLogo, SidebarBrand, SidebarNav } from "./sidebar";
 import { logoutAction } from "./actions";
+import { NotificationBell } from "./notification-bell";
 
 type Props = {
   menu: MenuSection[];
   user: { name: string; email: string; position: string | null; avatarUrl: string | null };
+  /** จำนวนแจ้งเตือนที่ยังไม่อ่าน (ค่าเริ่มต้น กระดิ่งอัปเดตเองทุก 30 วินาที) */
   notificationCount: number;
 };
 
@@ -50,14 +52,7 @@ export function Header({ menu, user, notificationCount }: Props) {
 
       <div className="flex-1" />
 
-      <Button variant="ghost" size="icon" className="relative" aria-label={`การแจ้งเตือน ${notificationCount} รายการ`}>
-        <Bell />
-        {notificationCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 flex min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-white">
-            {notificationCount > 99 ? "99+" : notificationCount}
-          </span>
-        )}
-      </Button>
+      <NotificationBell initialUnread={notificationCount} />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

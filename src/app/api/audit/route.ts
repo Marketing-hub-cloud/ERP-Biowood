@@ -22,6 +22,7 @@ const ENTITY_MENU: Record<string, string> = {
   PurchaseReturn: "purchase.return",
   ApprovalSetting: "settings.approval",
   NoteTemplate: "settings.remark",
+  NotificationSetting: "settings.notification",
   // Contact: ตรวจตามบทบาทด้านล่าง
 };
 

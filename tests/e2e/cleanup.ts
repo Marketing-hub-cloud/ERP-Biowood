@@ -110,6 +110,19 @@ export async function cleanupTestData(): Promise<Record<string, number>> {
       await c.query(`DELETE FROM approval_step_approvers WHERE "userId" = ANY($1)`, [users]);
       await c.query(`DELETE FROM approval_steps s WHERE NOT EXISTS (SELECT 1 FROM approval_step_approvers a WHERE a."stepId" = s.id)`);
       n.noteTemplates = (await c.query(`DELETE FROM note_templates WHERE title ILIKE $1 OR body ILIKE $1`, [MARK])).rowCount ?? 0;
+      // แจ้งเตือน (เฟส 6): ของเอกสารทดสอบ / ข้อความที่มี marker / กลุ่ม LINE ทดสอบ
+      await c.query(`DELETE FROM notifications WHERE "docId" = ANY($1) OR "userId" = ANY($2)`, [purchaseDocs, users]);
+      n.deliveries =
+        (await c.query(`DELETE FROM notification_deliveries WHERE "refId" = ANY($1) OR message ILIKE $2 OR target ILIKE $2`, [purchaseDocs, MARK])).rowCount ?? 0;
+      await c.query(`DELETE FROM line_groups WHERE "groupId" ILIKE $1 OR name ILIKE $1`, [MARK]);
+      // แจ้งเตือนกำพร้า: เอกสารถูกลบไปแล้ว (ในระบบจริงเอกสารจัดซื้อลบไม่ได้ มีแต่จากเทส)
+      n.orphanNotifications =
+        (
+          await c.query(`DELETE FROM notifications n WHERE
+            (n."docType" = PR AND NOT EXISTS (SELECT 1 FROM purchase_requests WHERE id = n."docId") AND n."docId" <> ALL($1)) OR
+            (n."docType" = PO AND NOT EXISTS (SELECT 1 FROM purchase_orders WHERE id = n."docId") AND n."docId" <> ALL($1)) OR
+            (n."docType" = RT AND NOT EXISTS (SELECT 1 FROM purchase_returns WHERE id = n."docId") AND n."docId" <> ALL($1))`, [purchaseDocs])
+        ).rowCount ?? 0;
 
       const all = [...users, ...groups, ...contacts, ...products, ...attributes, ...units, ...categories, ...locations, ...receipts, ...issues, ...purchaseDocs];
       n.auditLogs = (await c.query(`DELETE FROM audit_logs WHERE "entityId" = ANY($1) OR "actorId" = ANY($2)`, [all, users])).rowCount ?? 0;
@@ -192,6 +205,40 @@ export async function restoreApproval(since: Date) {
         await c.query(`INSERT INTO approval_step_approvers ("stepId", "userId") VALUES ($1, $2) ON CONFLICT DO NOTHING`, [steps.get(k), r.userId]);
       }
       await c.query(`DELETE FROM audit_logs WHERE "entityType" = 'ApprovalSetting' AND "createdAt" >= $1`, [since]);
+      await c.query("COMMIT");
+    } catch (e) {
+      await c.query("ROLLBACK");
+      throw e;
+    }
+  });
+}
+
+const NOTIFY_SNAPSHOT = path.join(process.cwd(), "tests", "e2e", ".auth", "notify-snapshot.json");
+
+/** เก็บตั้งค่าแจ้งเตือนไว้ก่อนเทส */
+export async function snapshotNotificationSettings() {
+  const rows = await withClient(async (c) => (await c.query(`SELECT * FROM notification_settings`)).rows);
+  await mkdir(path.dirname(NOTIFY_SNAPSHOT), { recursive: true });
+  await writeFile(NOTIFY_SNAPSHOT, JSON.stringify(rows));
+}
+
+/** คืนค่าตั้งค่าแจ้งเตือน + ลบ audit log ที่เทสสร้าง */
+export async function restoreNotificationSettings(since: Date) {
+  const rows: { module: string; lineEnabled: boolean; lineGroupId: string | null; lineGroupName: string | null; updatedById: string | null }[] | null = JSON.parse(
+    await readFile(NOTIFY_SNAPSHOT, "utf8").catch(() => "null"),
+  );
+  if (!rows) return;
+  await withClient(async (c) => {
+    await c.query("BEGIN");
+    try {
+      await c.query(`DELETE FROM notification_settings`);
+      for (const r of rows) {
+        await c.query(
+          `INSERT INTO notification_settings (module, "lineEnabled", "lineGroupId", "lineGroupName", "updatedById", "updatedAt") VALUES ($1, $2, $3, $4, $5, now())`,
+          [r.module, r.lineEnabled, r.lineGroupId, r.lineGroupName, r.updatedById],
+        );
+      }
+      await c.query(`DELETE FROM audit_logs WHERE "entityType" = 'NotificationSetting' AND "createdAt" >= $1`, [since]);
       await c.query("COMMIT");
     } catch (e) {
       await c.query("ROLLBACK");

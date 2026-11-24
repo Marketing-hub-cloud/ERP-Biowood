@@ -108,7 +108,7 @@ export const MENU: MenuSection[] = [
       { key: "settings.approval", label: "การอนุมัติ", href: "/settings/approval", actions: VIEW_EDIT, ready: true },
       { key: "settings.remark", label: "ตั้งค่าหมายเหตุ", href: "/settings/remarks", actions: ALL, ready: true },
       { key: "settings.company", label: "ข้อมูลบริษัท", href: "/settings/company", actions: VIEW_EDIT, ready: true },
-      { key: "settings.notification", label: "การแจ้งเตือน", href: "/settings/notifications", actions: VIEW_EDIT },
+      { key: "settings.notification", label: "การแจ้งเตือน", href: "/settings/notifications", actions: VIEW_EDIT, ready: true },
     ],
   },
 ];

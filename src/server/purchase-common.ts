@@ -46,11 +46,6 @@ export async function lockDraft(tx: TxClient, table: "purchase_requests" | "purc
 export const PURCHASE_TX = { maxWait: 10_000, timeout: 30_000 } as const;
 
 /** จุดส่งแจ้งเตือน (ในระบบ + LINE "Biowood - จัดซื้อ") — ทำจริงในเฟส 6 */
-export type PurchaseEvent = { docType: "PR" | "PO" | "RT"; docId: string; docNo: string; event: string; actorName: string };
-// TODO(เฟส 6): เขียนลงคิวแจ้งเตือน (background job + retry) ห้ามทำให้การบันทึกเอกสารล้ม
-export function notifyPurchaseEvent(e: PurchaseEvent) {
-  void e;
-}
 
 /** ตัวเลือกของฟอร์มเอกสารจัดซื้อ: ผู้ใช้ (ผู้ขอ), สินค้า, คลัง */
 export async function getPurchaseFormOptions() {

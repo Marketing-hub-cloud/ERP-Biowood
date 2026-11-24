@@ -3,16 +3,18 @@ import { prisma, type TxClient } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
 import { ApiError } from "@/lib/errors";
 import { allocateDocNumber, DOC_PREFIXES } from "@/lib/doc-number";
-import { formatDate, formatNumber, fullName } from "@/lib/format";
+import { formatDate, formatNumber } from "@/lib/format";
 import { isApprovedLike, STATUS_LABELS } from "@/lib/approval";
 import { calcPurchaseOrder, formatMoney, VAT_MODE_LABELS } from "@/lib/purchase-calc";
 import { dateOnly, sumQty, toMilli } from "@/lib/stock-rules";
 import { lockRows, poLineReceived, poLineReturned, prLineOrdered, recomputeRequests } from "@/lib/purchase-status";
 import type { PurchaseOrderData } from "@/lib/validators";
 import type { CurrentUser } from "@/lib/session";
+import { enqueuePurchaseEvent } from "@/lib/notifications";
+import { kickNotificationWorker } from "@/lib/notification-worker";
 import type { Prisma } from "@/generated/prisma/client";
 import { approvalHistory, recordApprovalAction, runApproval } from "./approval";
-import { assertProducts, assertVendor, assertWarehouse, lockDraft, notifyPurchaseEvent, PURCHASE_TX } from "./purchase-common";
+import { assertProducts, assertVendor, assertWarehouse, lockDraft, PURCHASE_TX } from "./purchase-common";
 
 export const ENTITY_PO = "PurchaseOrder";
 
@@ -123,11 +125,12 @@ export async function createOrder(actor: CurrentUser, d: PurchaseOrderData, ip: 
     const requestIds = await assertRequestLines(tx, d, null);
     const docNo = await allocateDocNumber(tx, DOC_PREFIXES.PURCHASE_ORDER);
     const o = await tx.purchaseOrder.create({ data: { ...header(d, c), docNo, createdById: actor.id, lines: { create: lineRows(d, c) } } });
-    await recomputeRequests(tx, requestIds);
+    await recomputeRequests(tx, requestIds, actor.id);
+    await enqueuePurchaseEvent(tx, { kind: "created", docType: "PO", docId: o.id, docNo: o.docNo, status: "DRAFT", actorId: actor.id });
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_PO, entityId: o.id, action: "CREATE", after: await snapshot(tx, o.id), ip });
     return o;
   }, PURCHASE_TX);
-  notifyPurchaseEvent({ docType: "PO", docId: doc.id, docNo: doc.docNo, event: "created", actorName: fullName(actor) });
+  kickNotificationWorker();
   return doc;
 }
 
@@ -145,7 +148,7 @@ export async function updateOrder(actor: CurrentUser, id: string, d: PurchaseOrd
     await tx.purchaseOrderLine.deleteMany({ where: { orderId: id } });
     await tx.purchaseOrder.update({ where: { id }, data: { ...header(d, c), updatedById: actor.id, lines: { create: lineRows(d, c) } } });
     const oldRequestIds = current.lines.map((l) => l.requestLine?.request.id).filter(Boolean) as string[];
-    await recomputeRequests(tx, [...requestIds, ...oldRequestIds]);
+    await recomputeRequests(tx, [...requestIds, ...oldRequestIds], actor.id);
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_PO, entityId: id, action: "UPDATE", before, after: await snapshot(tx, id), ip });
   }, PURCHASE_TX);
 }
@@ -167,12 +170,12 @@ export async function orderApproval(actor: CurrentUser, id: string, action: "sub
     },
     ip,
   );
-  notifyPurchaseEvent({ docType: "PO", docId: id, docNo: res.docNo, event: action, actorName: fullName(actor) });
+  kickNotificationWorker();
   return res;
 }
 
 export async function cancelOrder(actor: CurrentUser, id: string, reason: string, ip: string | null) {
-  const docNo = await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
     const [row] = await tx.$queryRaw<{ status: string; docNo: string; approvalRound: number }[]>`
       SELECT status::text AS status, "docNo", "approvalRound" FROM purchase_orders WHERE id = ${id} FOR UPDATE`;
     if (!row) throw new ApiError(404, "ไม่พบใบสั่งซื้อ");
@@ -187,12 +190,13 @@ export async function cancelOrder(actor: CurrentUser, id: string, reason: string
       where: { id },
       data: { status: "CANCELLED", currentStep: null, cancelledAt: new Date(), cancelledById: actor.id, cancelReason: reason, updatedById: actor.id },
     });
-    await recomputeRequests(tx, lines.map((l) => l.requestLine?.requestId).filter(Boolean) as string[]);
+    await recomputeRequests(tx, lines.map((l) => l.requestLine?.requestId).filter(Boolean) as string[], actor.id);
     await recordApprovalAction(tx, { docType: "PO", docId: id, round: row.approvalRound, stepNo: null, action: "CANCEL", actorId: actor.id, comment: reason });
+    await enqueuePurchaseEvent(tx, { kind: "cancelled", docType: "PO", docId: id, docNo: row.docNo, status: "CANCELLED", actorId: actor.id, comment: reason });
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_PO, entityId: id, action: "CANCEL", before, after: await snapshot(tx, id), note: `ยกเลิก: ${reason}`, ip });
     return row.docNo;
   }, PURCHASE_TX);
-  notifyPurchaseEvent({ docType: "PO", docId: id, docNo, event: "cancelled", actorName: fullName(actor) });
+  kickNotificationWorker();
 }
 
 /** ข้อมูลหน้าเอกสาร: รายการ + นำเข้าแล้ว/ส่งคืนแล้ว + ประวัติ + เอกสารที่อ้างอิง */

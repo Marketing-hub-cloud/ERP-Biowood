@@ -9,6 +9,7 @@ import { dateOnly, planSerials, RECEIPT_STATUS_LABELS, RECEIPT_TYPE_LABELS, sumQ
 import { pathLabel, type TreeNode } from "@/lib/tree";
 import type { ReceiptData } from "@/lib/validators";
 import type { CurrentUser } from "@/lib/session";
+import { kickNotificationWorker } from "@/lib/notification-worker";
 import type { Prisma } from "@/generated/prisma/client";
 
 export const ENTITY_RECEIPT = "GoodsReceipt";
@@ -228,6 +229,11 @@ export async function scanReceiptSerial(actor: CurrentUser, id: string, barcode:
 }
 
 export async function postReceiptDoc(actor: CurrentUser, id: string, ip: string | null) {
+  await postReceiptTx(actor, id, ip);
+  kickNotificationWorker();
+}
+
+async function postReceiptTx(actor: CurrentUser, id: string, ip: string | null) {
   await prisma.$transaction(async (tx) => {
     const before = await snapshot(tx, id);
     const res = await postReceipt(tx, id, actor.id);
@@ -245,6 +251,11 @@ export async function postReceiptDoc(actor: CurrentUser, id: string, ip: string 
 }
 
 export async function cancelReceiptDoc(actor: CurrentUser, id: string, reason: string, ip: string | null) {
+  await cancelReceiptTx(actor, id, reason, ip);
+  kickNotificationWorker();
+}
+
+async function cancelReceiptTx(actor: CurrentUser, id: string, reason: string, ip: string | null) {
   await prisma.$transaction(async (tx) => {
     const before = await snapshot(tx, id);
     const res = await cancelReceipt(tx, id, actor.id, reason);

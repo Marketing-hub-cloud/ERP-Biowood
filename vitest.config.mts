@@ -14,5 +14,7 @@ export default defineConfig({
     include: ["tests/unit/**/*.test.ts", "tests/db/**/*.test.ts"],
     environment: "node",
     testTimeout: 30_000,
+    // เทส DB ใช้ฐานข้อมูลเดียวกันและแก้ค่ากลาง (เช่น ผังอนุมัติ) จึงรันทีละไฟล์
+    fileParallelism: false,
   },
 });
