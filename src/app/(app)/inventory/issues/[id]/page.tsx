@@ -4,6 +4,7 @@ import { can } from "@/lib/rbac";
 import { formatDateTime, fullName } from "@/lib/format";
 import { dateOnlyString } from "@/lib/stock-rules";
 import { getIssueDetail } from "@/server/goods-issues";
+import { issuableReturns, openReturnLines } from "@/server/purchase-returns";
 import { PageHeader } from "@/components/page-header";
 import { AuditHistory } from "@/components/audit-history";
 import { DocStatusBadge } from "../../_components/doc-status-badge";
@@ -15,6 +16,11 @@ export default async function IssueDetailPage({ params }: PageProps<"/inventory/
   const detail = await getIssueDetail(id);
   if (!detail) notFound();
   const { doc: d, lines } = detail;
+  const isDraft = d.status === "DRAFT";
+  const [returnOptions, rt] = await Promise.all([
+    isDraft ? issuableReturns() : Promise.resolve([]),
+    d.purchaseReturnId && isDraft ? openReturnLines(d.purchaseReturnId) : Promise.resolve(null),
+  ]);
   const canEdit = can(user.permissions, "inventory.issue", "edit");
   const info =
     d.status === "POSTED"
@@ -42,6 +48,7 @@ export default async function IssueDetailPage({ params }: PageProps<"/inventory/
         canEdit={canEdit}
         canPost={canEdit}
         canCancel={can(user.permissions, "inventory.issue", "cancel")}
+        returnOptions={returnOptions}
         issue={{
           id: d.id,
           docNo: d.docNo,
@@ -49,6 +56,7 @@ export default async function IssueDetailPage({ params }: PageProps<"/inventory/
           values: {
             type: d.type,
             docDate: dateOnlyString(d.docDate),
+            purchaseReturn: d.purchaseReturn ? { id: d.purchaseReturn.id, docNo: d.purchaseReturn.docNo, lines: rt?.lines ?? [] } : null,
             contact: d.contact,
             recipientName: d.recipientName ?? "",
             shippingAddress: d.shippingAddress ?? "",

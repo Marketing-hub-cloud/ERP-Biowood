@@ -16,21 +16,30 @@ import { FormField } from "@/components/form-field";
 import { DocNumberField } from "@/components/doc-number-field";
 import { DateField } from "@/components/date-field";
 import { ScanInput } from "@/components/scan-input";
+import { SearchSelect } from "@/components/search-select";
 import { api, ApiClientError, errorMessage } from "@/lib/client-api";
+import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format";
 import { DISABLED_ISSUE_TYPES, ISSUE_TYPE_LABELS, parseQty, sumQty, toMilli } from "@/lib/stock-rules";
 import { issueSchema } from "@/lib/validators";
 import type { SerialInfo } from "@/server/goods-issues";
-import type { ContactOption } from "@/app/api/inventory/issues/contacts/route";
-import type { ContactAddressOption } from "@/app/api/inventory/issues/contacts/[id]/route";
+import type { ContactOption } from "@/app/api/contact-options/route";
+import type { ContactAddressOption } from "@/app/api/contact-options/[id]/route";
 import { CancelDocDialog } from "../_components/cancel-doc-dialog";
-import { ContactPicker } from "./contact-picker";
+import { ContactPicker } from "@/components/contact-picker";
 
 type IssueType = keyof typeof ISSUE_TYPE_LABELS;
 export type IssueLineView = { serial: SerialInfo; quantity: string; note: string };
+/** รายการที่ต้องส่งคืนของใบส่งคืนที่อ้างอิง (ประเภทส่งคืน) */
+export type ReturnRef = {
+  id: string;
+  docNo: string;
+  lines: { returnLineId: string; productId: string; productCode: string; productName: string; unit: string; remaining: number }[];
+};
 export type IssueValues = {
   type: IssueType;
   docDate: string;
+  purchaseReturn: ReturnRef | null;
   contact: ContactOption | null;
   recipientName: string;
   shippingAddress: string;
@@ -45,6 +54,7 @@ const payload = (v: IssueValues, post: boolean) => ({
   type: v.type,
   docDate: v.docDate,
   contactId: v.contact?.id ?? null,
+  purchaseReturnId: v.type === "RETURN" ? (v.purchaseReturn?.id ?? null) : null,
   recipientName: v.recipientName,
   shippingAddress: v.shippingAddress,
   note: v.note,
@@ -52,7 +62,27 @@ const payload = (v: IssueValues, post: boolean) => ({
   post,
 });
 
-export function IssueForm({ issue, defaults, canEdit, canPost, canCancel }: { issue: IssueView | null; defaults?: IssueValues; canEdit: boolean; canPost: boolean; canCancel: boolean }) {
+type OpenReturnResponse = {
+  purchaseReturn: { id: string; docNo: string; vendor: ContactOption };
+  lines: ReturnRef["lines"];
+};
+
+export function IssueForm({
+  issue,
+  defaults,
+  canEdit,
+  canPost,
+  canCancel,
+  returnOptions = [],
+}: {
+  issue: IssueView | null;
+  defaults?: IssueValues;
+  canEdit: boolean;
+  canPost: boolean;
+  canCancel: boolean;
+  /** ใบส่งคืนที่อนุมัติแล้ว (ประเภทส่งคืน) */
+  returnOptions?: { id: string; docNo: string; vendor: string }[];
+}) {
   const router = useRouter();
   const initial = useMemo(() => issue?.values ?? defaults!, [issue, defaults]);
   const [v, setV] = useState<IssueValues>(initial);
@@ -74,7 +104,7 @@ export function IssueForm({ issue, defaults, canEdit, canPost, canCancel }: { is
   useEffect(() => {
     if (!contactId || !editable) return;
     let cancelled = false;
-    fetch(`/api/inventory/issues/contacts/${contactId}`)
+    fetch(`/api/contact-options/${contactId}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((d: ContactAddressOption[]) => {
         if (cancelled) return;
@@ -103,9 +133,44 @@ export function IssueForm({ issue, defaults, canEdit, canPost, canCancel }: { is
         toast.warning(`${s.barcode} อยู่ในรายการแล้ว`);
         return;
       }
+      let qty = s.balance;
+      if (v.type === "RETURN") {
+        const rt = v.purchaseReturn;
+        if (!rt) {
+          toast.error("กรุณาเลือกใบส่งคืนก่อนสแกน");
+          return;
+        }
+        const left = returnLeft(rt, v.lines, s.productId);
+        if (left === null) {
+          toast.error(`${s.productCode} ไม่อยู่ในใบส่งคืน ${rt.docNo}`);
+          return;
+        }
+        if (left <= 0) {
+          toast.error(`${s.productCode} สแกนครบจำนวนที่ต้องส่งคืนแล้ว`);
+          return;
+        }
+        qty = Math.min(qty, left);
+      }
       scannedRef.current.add(s.barcode);
-      setV((st) => (st.lines.some((l) => l.serial.serialId === s.serialId) ? st : { ...st, lines: [...st.lines, { serial: s, quantity: String(s.balance), note: "" }] }));
+      setV((st) => (st.lines.some((l) => l.serial.serialId === s.serialId) ? st : { ...st, lines: [...st.lines, { serial: s, quantity: String(qty), note: "" }] }));
       toast.success(`เพิ่ม ${s.barcode} (${s.productCode}) คงเหลือ ${formatNumber(s.balance)} ${s.unit}`);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
+
+  async function pickReturn(id: string) {
+    try {
+      const r = await api<OpenReturnResponse>(`/api/purchase/returns/options?id=${id}`);
+      setAddresses([]);
+      setV((s) => ({
+        ...s,
+        purchaseReturn: { id: r.purchaseReturn.id, docNo: r.purchaseReturn.docNo, lines: r.lines },
+        contact: r.purchaseReturn.vendor,
+        recipientName: s.recipientName || r.purchaseReturn.vendor.name,
+        shippingAddress: "",
+        lines: [],
+      }));
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -119,6 +184,14 @@ export function IssueForm({ issue, defaults, canEdit, canPost, canCancel }: { is
       const q = parseQty(l.quantity);
       if (q !== null && q > 0 && toMilli(q) > toMilli(l.serial.balance)) fe[`lines.${i}.quantity`] = `เกินคงเหลือ (${formatNumber(l.serial.balance)})`;
     });
+    if (v.type === "RETURN" && v.purchaseReturn) {
+      for (const rl of returnSummary(v.purchaseReturn, v.lines)) {
+        if (toMilli(rl.scanned) > toMilli(rl.remaining)) {
+          const i = v.lines.findIndex((l) => l.serial.productId === rl.productId);
+          fe[`lines.${i}.quantity`] = `${rl.productCode}: เกินจำนวนที่ต้องส่งคืน (${formatNumber(rl.remaining)})`;
+        }
+      }
+    }
     return fe;
   }
 
@@ -192,7 +265,19 @@ export function IssueForm({ issue, defaults, canEdit, canPost, canCancel }: { is
             <DocNumberField prefix="GI" value={issue?.docNo} />
           </FormField>
           <FormField label="ประเภท" htmlFor="type" required error={err("type")}>
-            <Select value={v.type} onValueChange={(x) => set("type", x as IssueType)} disabled={!editable}>
+            <Select
+              value={v.type}
+              onValueChange={(x) =>
+                setV((s) => ({
+                  ...s,
+                  type: x as IssueType,
+                  purchaseReturn: null,
+                  // ออกจากประเภทส่งคืน: ล้างผู้รับที่มาจากใบส่งคืน
+                  ...(s.type === "RETURN" || x === "RETURN" ? { contact: null, shippingAddress: "", lines: [] } : {}),
+                }))
+              }
+              disabled={!editable}
+            >
               <SelectTrigger id="type" className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -209,7 +294,27 @@ export function IssueForm({ issue, defaults, canEdit, canPost, canCancel }: { is
           <FormField label="วันที่เอกสาร" htmlFor="docDate" required error={err("docDate")}>
             <DateField id="docDate" value={v.docDate} onChange={(x) => set("docDate", x)} disabled={!editable} />
           </FormField>
-          <FormField label={v.type === "SALE" ? "ลูกค้า" : "ผู้ติดต่อ"} htmlFor="contactId" required={v.type === "SALE"} error={err("contactId")}>
+          {v.type === "RETURN" && (
+            <FormField label="ใบส่งคืน" htmlFor="purchaseReturnId" required error={err("purchaseReturnId")}>
+              {!editable || v.lines.length > 0 ? (
+                <Input id="purchaseReturnId" value={v.purchaseReturn?.docNo ?? ""} readOnly className="font-mono" />
+              ) : (
+                <SearchSelect
+                  id="purchaseReturnId"
+                  value={v.purchaseReturn?.id ?? null}
+                  onChange={pickReturn}
+                  options={returnOptions.map((r) => ({ value: r.id, label: r.docNo, hint: r.vendor }))}
+                  placeholder="- เลือกใบส่งคืนที่อนุมัติแล้ว -"
+                />
+              )}
+            </FormField>
+          )}
+          <FormField
+            label={v.type === "SALE" ? "ลูกค้า" : v.type === "RETURN" ? "ผู้ขาย (ผู้รับคืน)" : "ผู้ติดต่อ"}
+            htmlFor="contactId"
+            required={v.type === "SALE"}
+            error={err("contactId")}
+          >
             <ContactPicker
               id="contactId"
               value={v.contact}
@@ -217,8 +322,8 @@ export function IssueForm({ issue, defaults, canEdit, canPost, canCancel }: { is
                 setAddresses([]);
                 setV((s) => ({ ...s, contact: c, shippingAddress: c?.id === s.contact?.id ? s.shippingAddress : "" }));
               }}
-              customersOnly={v.type === "SALE"}
-              disabled={!editable}
+              role={v.type === "SALE" ? "customer" : null}
+              disabled={!editable || v.type === "RETURN"}
               invalid={Boolean(err("contactId"))}
             />
           </FormField>
@@ -254,6 +359,38 @@ export function IssueForm({ issue, defaults, canEdit, canPost, canCancel }: { is
           </FormField>
         </CardContent>
       </Card>
+
+      {v.type === "RETURN" && v.purchaseReturn && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">สินค้าที่ต้องส่งคืนตาม {v.purchaseReturn.docNo}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>สินค้า</TableHead>
+                  <TableHead className="text-right">ต้องคืน (คงค้าง)</TableHead>
+                  <TableHead className="text-right">สแกนในใบนี้</TableHead>
+                  <TableHead>หน่วย</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {returnSummary(v.purchaseReturn, v.lines).map((r) => (
+                  <TableRow key={r.productId} data-testid="return-expected">
+                    <TableCell>
+                      <span className="font-mono text-xs">{r.productCode}</span> {r.productName}
+                    </TableCell>
+                    <TableCell className="text-right">{formatNumber(r.remaining)}</TableCell>
+                    <TableCell className={cn("text-right", toMilli(r.scanned) > toMilli(r.remaining) && "text-destructive")}>{formatNumber(r.scanned)}</TableCell>
+                    <TableCell>{r.unit}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center gap-2 space-y-0">
@@ -383,4 +520,25 @@ export function IssueForm({ issue, defaults, canEdit, canPost, canCancel }: { is
       )}
     </div>
   );
+}
+
+/** สรุปรายการที่ต้องส่งคืนต่อสินค้า: คงค้าง vs ที่สแกนในใบนี้ */
+function returnSummary(rt: ReturnRef, lines: IssueLineView[]) {
+  const byProduct = new Map<string, { productId: string; productCode: string; productName: string; unit: string; remaining: number; scanned: number }>();
+  for (const l of rt.lines) {
+    const cur = byProduct.get(l.productId) ?? { productId: l.productId, productCode: l.productCode, productName: l.productName, unit: l.unit, remaining: 0, scanned: 0 };
+    cur.remaining = sumQty([cur.remaining, l.remaining]);
+    byProduct.set(l.productId, cur);
+  }
+  for (const l of lines) {
+    const cur = byProduct.get(l.serial.productId);
+    if (cur) cur.scanned = sumQty([cur.scanned, parseQty(l.quantity) ?? 0]);
+  }
+  return [...byProduct.values()];
+}
+
+/** จำนวนที่ยังสแกนคืนได้ของสินค้านี้ (null = สินค้าไม่อยู่ในใบส่งคืน) */
+function returnLeft(rt: ReturnRef, lines: IssueLineView[], productId: string): number | null {
+  const r = returnSummary(rt, lines).find((x) => x.productId === productId);
+  return r ? sumQty([r.remaining, -r.scanned]) : null;
 }

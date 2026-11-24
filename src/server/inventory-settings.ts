@@ -2,7 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { prisma, type TxClient } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
-import { ApiError } from "@/lib/api";
+import { ApiError } from "@/lib/errors";
 import { ancestry, checkPlacement, descendantIds, relevel, TREE_CONFIG, type TreeKind, type TreeNode } from "@/lib/tree";
 import { attributeSchema, treeNodeSchema, unitSchema } from "@/lib/validators";
 import type { CurrentUser } from "@/lib/session";

@@ -1,7 +1,7 @@
 // โครงสร้างเมนู + รายการ menuKey ที่ใช้กำหนดสิทธิ์ (ดู CLAUDE.md หัวข้อ 3)
 // ไฟล์นี้ใช้ได้ทั้งฝั่ง client และ server (ห้าม import ของฝั่ง server)
 
-export const PERMISSION_ACTIONS = ["view", "create", "edit", "delete", "cancel"] as const;
+export const PERMISSION_ACTIONS = ["view", "create", "edit", "delete", "cancel", "approve"] as const;
 export type PermissionAction = (typeof PERMISSION_ACTIONS)[number];
 
 export const ACTION_LABELS: Record<PermissionAction, string> = {
@@ -10,9 +10,12 @@ export const ACTION_LABELS: Record<PermissionAction, string> = {
   edit: "แก้ไข",
   delete: "ลบ",
   cancel: "ยกเลิก",
+  approve: "อนุมัติ",
 };
 
-const ALL: PermissionAction[] = [...PERMISSION_ACTIONS];
+const ALL: PermissionAction[] = ["view", "create", "edit", "delete", "cancel"];
+/** เอกสารที่ผ่าน approval engine: มีสิทธิ์ "อนุมัติ" เพิ่ม (ใช้เมื่อไม่ได้ตั้งผังอนุมัติ) */
+const ALL_APPROVE: PermissionAction[] = [...ALL, "approve"];
 const VIEW_ONLY: PermissionAction[] = ["view"];
 const VIEW_EDIT: PermissionAction[] = ["view", "edit"];
 
@@ -80,9 +83,9 @@ export const MENU: MenuSection[] = [
     label: "จัดซื้อ",
     icon: "purchase",
     items: [
-      { key: "purchase.request", label: "ใบขอซื้อ", href: "/purchase/requests", actions: ALL },
-      { key: "purchase.order", label: "ใบสั่งซื้อ", href: "/purchase/orders", actions: ALL },
-      { key: "purchase.return", label: "ใบส่งคืน", href: "/purchase/returns", actions: ALL },
+      { key: "purchase.request", label: "ใบขอซื้อ", href: "/purchase/requests", actions: ALL_APPROVE, ready: true },
+      { key: "purchase.order", label: "ใบสั่งซื้อ", href: "/purchase/orders", actions: ALL_APPROVE, ready: true },
+      { key: "purchase.return", label: "ใบส่งคืน", href: "/purchase/returns", actions: ALL_APPROVE, ready: true },
       { key: "purchase.report", label: "รายงาน", href: "/purchase/reports", actions: VIEW_ONLY },
     ],
   },
@@ -102,8 +105,8 @@ export const MENU: MenuSection[] = [
     icon: "settings",
     items: [
       { key: "settings.inventory", label: "ตั้งค่าคลัง", href: "/settings/inventory", actions: VIEW_EDIT, ready: true },
-      { key: "settings.approval", label: "การอนุมัติ", href: "/settings/approval", actions: VIEW_EDIT },
-      { key: "settings.remark", label: "ตั้งค่าหมายเหตุ", href: "/settings/remarks", actions: ALL },
+      { key: "settings.approval", label: "การอนุมัติ", href: "/settings/approval", actions: VIEW_EDIT, ready: true },
+      { key: "settings.remark", label: "ตั้งค่าหมายเหตุ", href: "/settings/remarks", actions: ALL, ready: true },
       { key: "settings.company", label: "ข้อมูลบริษัท", href: "/settings/company", actions: VIEW_EDIT, ready: true },
       { key: "settings.notification", label: "การแจ้งเตือน", href: "/settings/notifications", actions: VIEW_EDIT },
     ],

@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma, type TxClient } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
-import { ApiError } from "@/lib/api";
+import { ApiError } from "@/lib/errors";
 import { allocateDocNumber, DOC_PREFIXES } from "@/lib/doc-number";
 import { formatDate, formatNumber } from "@/lib/format";
 import { cancelReceipt, isInWarehouse, postReceipt, STOCK_TX } from "@/lib/stock-ledger";
@@ -15,6 +15,7 @@ export const ENTITY_RECEIPT = "GoodsReceipt";
 
 export const receiptInclude = {
   warehouse: true,
+  order: { select: { id: true, docNo: true, vendor: { select: { name: true } } } },
   createdBy: { select: { firstName: true, lastName: true } },
   postedBy: { select: { firstName: true, lastName: true } },
   cancelledBy: { select: { firstName: true, lastName: true } },
@@ -44,6 +45,7 @@ async function snapshot(tx: TxClient, id: string) {
     type: RECEIPT_TYPE_LABELS[r.type],
     docDate: formatDate(r.docDate),
     warehouse: r.warehouse.name,
+    purchaseOrder: r.order?.docNo ?? null,
     lot: r.lot,
     note: r.note,
     status: RECEIPT_STATUS_LABELS[r.status],
@@ -55,6 +57,19 @@ async function snapshot(tx: TxClient, id: string) {
   };
 }
 
+/** ประเภทสั่งซื้อ: PO ต้องอนุมัติแล้วและยังรับไม่ครบ (ใบเดิมที่อ้าง PO นี้อยู่แล้วแก้ต่อได้) และทุกรายการมาจาก PO นี้ */
+async function assertOrderLines(tx: TxClient, d: ReceiptData, currentOrderId?: string | null) {
+  const po = d.purchaseOrderId ? await tx.purchaseOrder.findUnique({ where: { id: d.purchaseOrderId }, include: { lines: true } }) : null;
+  const okStatus = po && (po.status === "APPROVED" || po.status === "PARTIAL" || (po.status === "COMPLETED" && po.id === currentOrderId));
+  if (!po || !okStatus) throw new ApiError(400, "ใบสั่งซื้อนี้ยังไม่อนุมัติ ถูกยกเลิก หรือนำเข้าครบแล้ว", { purchaseOrderId: "ใบสั่งซื้อไม่ถูกต้อง" });
+  const fields: Record<string, string> = {};
+  d.lines.forEach((l, i) => {
+    const ol = po.lines.find((x) => x.id === l.orderLineId);
+    if (!ol || ol.productId !== l.productId) fields[`lines.${i}.productId`] = "รายการนี้ไม่อยู่ในใบสั่งซื้อ";
+  });
+  if (Object.keys(fields).length) throw new ApiError(400, Object.values(fields)[0], fields);
+}
+
 /** lock เอกสาร + ต้องเป็นร่าง */
 async function lockDraft(tx: TxClient, id: string) {
   const rows = await tx.$queryRaw<{ status: string; docNo: string }[]>`SELECT status::text AS status, "docNo" FROM goods_receipts WHERE id = ${id} FOR UPDATE`;
@@ -64,8 +79,8 @@ async function lockDraft(tx: TxClient, id: string) {
 }
 
 /** ตรวจคลัง/สินค้า/สถานที่ */
-async function assertRefs(tx: TxClient, d: ReceiptData, keepProductIds: Set<string> = new Set()) {
-  if (d.type === "PURCHASE") throw new ApiError(400, "การนำเข้าจากใบสั่งซื้อจะเปิดใช้ในระบบจัดซื้อ", { type: "ยังไม่เปิดใช้" });
+async function assertRefs(tx: TxClient, d: ReceiptData, keepProductIds: Set<string> = new Set(), currentOrderId?: string | null) {
+  if (d.type === "PURCHASE") await assertOrderLines(tx, d, currentOrderId);
   const nodes = (await tx.stockLocation.findMany()) as TreeNode[];
   const wh = nodes.find((n) => n.id === d.warehouseId);
   if (!wh || wh.level !== 0) throw new ApiError(400, "ไม่พบคลัง", { warehouseId: "ไม่พบคลัง" });
@@ -94,12 +109,13 @@ export async function createReceipt(actor: CurrentUser, d: ReceiptData, ip: stri
       data: {
         docNo,
         type: d.type,
+        purchaseOrderId: d.type === "PURCHASE" ? d.purchaseOrderId : null,
         docDate: dateOnly(d.docDate),
         warehouseId: d.warehouseId,
         lot: d.lot,
         note: d.note,
         createdById: actor.id,
-        lines: { create: d.lines.map((l, i) => ({ lineNo: i + 1, productId: l.productId, locationId: l.locationId, note: l.note })) },
+        lines: { create: d.lines.map((l, i) => ({ lineNo: i + 1, productId: l.productId, locationId: l.locationId, orderLineId: d.type === "PURCHASE" ? l.orderLineId : null, note: l.note })) },
       },
     });
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_RECEIPT, entityId: r.id, action: "CREATE", after: await snapshot(tx, r.id), ip });
@@ -111,7 +127,7 @@ export async function updateReceipt(actor: CurrentUser, id: string, d: ReceiptDa
   await prisma.$transaction(async (tx) => {
     await lockDraft(tx, id);
     const current = await tx.goodsReceipt.findUniqueOrThrow({ where: { id }, include: { lines: { include: { _count: { select: { serials: true } } } } } });
-    await assertRefs(tx, d, new Set(current.lines.map((l) => l.productId)));
+    await assertRefs(tx, d, new Set(current.lines.map((l) => l.productId)), current.purchaseOrderId);
     const before = await snapshot(tx, id);
 
     const keepIds = new Set(d.lines.map((l) => l.id).filter(Boolean) as string[]);
@@ -128,10 +144,18 @@ export async function updateReceipt(actor: CurrentUser, id: string, d: ReceiptDa
 
     await tx.goodsReceipt.update({
       where: { id },
-      data: { type: d.type, docDate: dateOnly(d.docDate), warehouseId: d.warehouseId, lot: d.lot, note: d.note, updatedById: actor.id },
+      data: {
+        type: d.type,
+        purchaseOrderId: d.type === "PURCHASE" ? d.purchaseOrderId : null,
+        docDate: dateOnly(d.docDate),
+        warehouseId: d.warehouseId,
+        lot: d.lot,
+        note: d.note,
+        updatedById: actor.id,
+      },
     });
     for (const [i, l] of d.lines.entries()) {
-      const data = { lineNo: i + 1, productId: l.productId, locationId: l.locationId, note: l.note };
+      const data = { lineNo: i + 1, productId: l.productId, locationId: l.locationId, orderLineId: d.type === "PURCHASE" ? l.orderLineId : null, note: l.note };
       if (l.id) await tx.goodsReceiptLine.update({ where: { id: l.id }, data });
       else await tx.goodsReceiptLine.create({ data: { ...data, receiptId: id } });
     }

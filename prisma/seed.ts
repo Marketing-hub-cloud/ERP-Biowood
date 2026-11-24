@@ -12,6 +12,7 @@ import type { TxClient } from "../src/lib/db";
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
 
 const ALL = { view: true, create: true, edit: true, delete: true, cancel: true };
+const ALL_APPROVE = { ...ALL, approve: true };
 const VIEW = { view: true };
 
 const SAMPLE_GROUPS: { name: string; description: string; permissions: Record<string, Partial<typeof ALL>> }[] = [
@@ -21,9 +22,11 @@ const SAMPLE_GROUPS: { name: string; description: string; permissions: Record<st
     permissions: {
       "contacts.vendor": ALL,
       "inventory.product": VIEW,
-      "purchase.request": ALL,
-      "purchase.order": ALL,
-      "purchase.return": ALL,
+      "purchase.request": ALL_APPROVE,
+      "purchase.order": ALL_APPROVE,
+      "purchase.return": ALL_APPROVE,
+      "inventory.receipt": { view: true },
+      "settings.remark": ALL,
       "purchase.report": VIEW,
     },
   },
@@ -173,6 +176,21 @@ async function main() {
   const UNITS = ["แผ่น", "เส้น", "ชิ้น", "กล่อง", "ม้วน", "ชุด", "เมตร", "ตร.ม."];
   for (const [i, name] of UNITS.entries()) await prisma.unit.upsert({ where: { name }, update: {}, create: { name, sortOrder: i } });
   console.log("✔ ประเภทสินค้า / หน่วย");
+
+  // ───── จัดซื้อ (เฟส 5) ─────
+  for (const [i, label] of ["สินค้าชำรุด", "ส่งผิดรุ่น/ผิดสเปก", "ส่งเกินจำนวน", "คุณภาพไม่ผ่านมาตรฐาน"].entries()) {
+    await prisma.lookupOption.upsert({ where: { kind_label: { kind: "RETURN_REASON", label } }, update: {}, create: { kind: "RETURN_REASON", label, sortOrder: i } });
+  }
+  if ((await prisma.noteTemplate.count({ where: { module: "purchase" } })) === 0) {
+    await prisma.noteTemplate.createMany({
+      data: [
+        { module: "purchase", sortOrder: 0, title: "เงื่อนไขการส่งของ", body: "กรุณาส่งสินค้าพร้อมใบส่งของ/ใบกำกับภาษี และแจ้งล่วงหน้าก่อนส่งอย่างน้อย 1 วัน" },
+        { module: "purchase", sortOrder: 1, title: "การรับประกันสินค้า", body: "สินค้าต้องอยู่ในสภาพสมบูรณ์ หากพบสินค้าชำรุด บริษัทขอสงวนสิทธิ์ส่งคืนภายใน 7 วัน" },
+      ],
+    });
+    console.log("✔ หมายเหตุสำเร็จรูป (จัดซื้อ) 2 รายการ");
+  }
+  console.log("✔ เหตุผลการส่งคืน");
 
   if ((await prisma.stockLocation.count()) === 0) {
     const wh = await prisma.stockLocation.create({ data: { level: 0, code: "WH1", name: "คลังหลัก" } });

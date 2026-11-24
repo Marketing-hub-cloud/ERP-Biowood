@@ -31,7 +31,7 @@ export function uid() {
   return `e2e${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
-const NO_PERMS = { view: false, create: false, edit: false, delete: false, cancel: false };
+const NO_PERMS = { view: false, create: false, edit: false, delete: false, cancel: false, approve: false };
 
 /** สร้างกลุ่ม + ผู้ใช้ผ่าน API ด้วย session ของ admin */
 export async function createUserWithPerms(

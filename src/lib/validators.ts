@@ -71,6 +71,7 @@ const flags = z.object({
   edit: z.boolean(),
   delete: z.boolean(),
   cancel: z.boolean(),
+  approve: z.boolean().optional().default(false),
 });
 
 export const groupSchema = z.object({
@@ -235,7 +236,7 @@ export type ContactInput = z.input<typeof contactSchema>;
 export type ContactData = z.output<typeof contactSchema>;
 
 export const lookupSchema = z.object({
-  kind: z.enum(["CONTACT_SOURCE", "CUSTOMER_BUSINESS_TYPE", "PRODUCT_TYPE"]),
+  kind: z.enum(["CONTACT_SOURCE", "CUSTOMER_BUSINESS_TYPE", "PRODUCT_TYPE", "RETURN_REASON"]),
   label: required("ชื่อตัวเลือก", 100),
 });
 
@@ -336,6 +337,7 @@ const docDate = z
 
 export const receiptLineSchema = z.object({
   id: z.string().optional().nullable(),
+  orderLineId: text(50),
   productId: z.string({ error: "กรุณาเลือกสินค้า" }).min(1, "กรุณาเลือกสินค้า"),
   locationId: text(50),
   note: text(500),
@@ -343,12 +345,15 @@ export const receiptLineSchema = z.object({
 
 export const receiptSchema = z.object({
   type: z.enum(["PURCHASE", "OTHER"]).default("OTHER"),
+  purchaseOrderId: text(50),
   docDate,
   warehouseId: z.string({ error: "กรุณาเลือกคลัง" }).min(1, "กรุณาเลือกคลัง"),
   lot: text(100),
   note: text(2000),
   lines: z.array(receiptLineSchema).max(200, "ไม่เกิน 200 รายการ").default([]),
-});
+})
+  .refine((d) => d.type !== "PURCHASE" || d.purchaseOrderId, { message: "กรุณาเลือกใบสั่งซื้อ", path: ["purchaseOrderId"] })
+  .refine((d) => d.type !== "PURCHASE" || d.lines.every((l) => l.orderLineId), { message: "รายการต้องมาจากใบสั่งซื้อ", path: ["lines"] });
 export type ReceiptInput = z.input<typeof receiptSchema>;
 export type ReceiptData = z.output<typeof receiptSchema>;
 
@@ -376,12 +381,129 @@ export const issueSchema = z
     type: z.enum(["SALE", "RETURN", "SAMPLE", "OTHER"], { error: "กรุณาเลือกประเภท" }),
     docDate,
     contactId: text(50),
+    purchaseReturnId: text(50),
     recipientName: text(200),
     shippingAddress: text(1000),
     note: text(2000),
     lines: z.array(issueLineSchema).max(500, "ไม่เกิน 500 รายการ").default([]),
   })
   .refine((d) => d.type !== "SALE" || d.contactId, { message: "ประเภทขายต้องเลือกลูกค้า", path: ["contactId"] })
+  .refine((d) => d.type !== "RETURN" || d.purchaseReturnId, { message: "กรุณาเลือกใบส่งคืน", path: ["purchaseReturnId"] })
   .refine((d) => new Set(d.lines.map((l) => l.serialId)).size === d.lines.length, { message: "มี SN ซ้ำในรายการ", path: ["lines"] });
 export type IssueInput = z.input<typeof issueSchema>;
 export type IssueData = z.output<typeof issueSchema>;
+
+// ───────────────────────── เฟส 5: จัดซื้อ ─────────────────────────
+
+const optionalDate = z
+  .string()
+  .optional()
+  .nullable()
+  .transform((v) => (v ? v : null))
+  .refine((v) => v === null || /^\d{4}-\d{2}-\d{2}$/.test(v), "วันที่ไม่ถูกต้อง");
+
+const money = (label: string, decimals = 2) =>
+  z
+    .union([z.number(), z.string()])
+    .optional()
+    .nullable()
+    .transform((v, ctx) => {
+      if (v === null || v === undefined || v === "") return 0;
+      const s = String(v).replace(/,/g, "").trim();
+      if (!/^\d+(\.\d+)?$/.test(s) || (s.split(".")[1] ?? "").length > decimals) {
+        ctx.addIssue({ code: "custom", message: `${label}ต้องเป็นตัวเลขไม่ติดลบ ทศนิยมไม่เกิน ${decimals} ตำแหน่ง` });
+        return z.NEVER;
+      }
+      return Number(s);
+    })
+    .refine((n) => n < 1e11, `${label}มากเกินไป`);
+
+export const requestLineSchema = z.object({
+  productId: z.string({ error: "กรุณาเลือกสินค้า" }).min(1, "กรุณาเลือกสินค้า"),
+  quantity: qty(),
+  note: text(500),
+});
+
+export const purchaseRequestSchema = z.object({
+  docDate,
+  requiredDate: optionalDate,
+  requesterId: z.string({ error: "กรุณาเลือกผู้ขอ" }).min(1, "กรุณาเลือกผู้ขอ"),
+  department: text(100),
+  position: text(100),
+  reference: text(200),
+  warehouseId: text(50),
+  note: text(2000),
+  lines: z.array(requestLineSchema).min(1, "กรุณาเพิ่มรายการสินค้าอย่างน้อย 1 รายการ").max(200, "ไม่เกิน 200 รายการ"),
+});
+export type PurchaseRequestInput = z.input<typeof purchaseRequestSchema>;
+export type PurchaseRequestData = z.output<typeof purchaseRequestSchema>;
+
+export const orderLineSchema = z.object({
+  productId: z.string({ error: "กรุณาเลือกสินค้า" }).min(1, "กรุณาเลือกสินค้า"),
+  requestLineId: text(50),
+  quantity: qty(),
+  unitPrice: money("ราคาต่อหน่วย", 4),
+  discount: money("ส่วนลด"),
+  note: text(500),
+});
+
+export const purchaseOrderSchema = z.object({
+  docDate,
+  deliveryDate: optionalDate,
+  vendorId: z.string({ error: "กรุณาเลือกผู้ขาย" }).min(1, "กรุณาเลือกผู้ขาย"),
+  paymentTerms: text(200),
+  reference: text(200),
+  warehouseId: text(50),
+  note: text(2000),
+  vatMode: z.enum(["EXCLUSIVE", "INCLUSIVE", "NONE"]).default("EXCLUSIVE"),
+  headerDiscount: money("ส่วนลดท้ายบิล"),
+  lines: z
+    .array(orderLineSchema)
+    .min(1, "กรุณาเพิ่มรายการสินค้าอย่างน้อย 1 รายการ")
+    .max(200, "ไม่เกิน 200 รายการ")
+    .refine((ls) => {
+      const ids = ls.map((l) => l.requestLineId).filter(Boolean);
+      return new Set(ids).size === ids.length;
+    }, "มีรายการ PR ซ้ำกัน"),
+});
+export type PurchaseOrderInput = z.input<typeof purchaseOrderSchema>;
+export type PurchaseOrderData = z.output<typeof purchaseOrderSchema>;
+
+export const returnLineSchema = z.object({
+  orderLineId: z.string().min(1),
+  quantity: qty("จำนวนที่คืน"),
+  note: text(500),
+});
+
+export const purchaseReturnSchema = z.object({
+  docDate,
+  orderId: z.string({ error: "กรุณาเลือกใบสั่งซื้อ" }).min(1, "กรุณาเลือกใบสั่งซื้อ"),
+  reasonId: z.string({ error: "กรุณาเลือกเหตุผลการคืน" }).min(1, "กรุณาเลือกเหตุผลการคืน"),
+  note: text(2000),
+  lines: z
+    .array(returnLineSchema)
+    .min(1, "กรุณาระบุจำนวนที่คืนอย่างน้อย 1 รายการ")
+    .refine((ls) => new Set(ls.map((l) => l.orderLineId)).size === ls.length, "มีรายการซ้ำกัน"),
+});
+export type PurchaseReturnInput = z.input<typeof purchaseReturnSchema>;
+export type PurchaseReturnData = z.output<typeof purchaseReturnSchema>;
+
+export const approvalActionSchema = z.object({
+  action: z.enum(["submit", "approve", "reject", "cancel"]),
+  comment: z.string().trim().max(1000).optional().nullable(),
+});
+
+export const approvalConfigSchema = z.object({
+  steps: z.array(z.array(z.string().min(1)).max(50)).max(3, "ตั้งได้สูงสุด 3 ลำดับ"),
+});
+
+export const NOTE_MODULES = { purchase: "จัดซื้อ" } as const;
+
+export const noteTemplateSchema = z.object({
+  module: z.enum(Object.keys(NOTE_MODULES) as [keyof typeof NOTE_MODULES]),
+  title: required("ชื่อหมายเหตุ", 100),
+  body: required("ข้อความ", 5000),
+  sortOrder: z.coerce.number().int().min(0).max(9999).optional().default(0),
+  isActive: z.boolean().optional().default(true),
+});
+export type NoteTemplateInput = z.input<typeof noteTemplateSchema>;

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { formatDateTime, fullName } from "@/lib/format";
 import { dateOnlyString } from "@/lib/stock-rules";
 import { getStockFormOptions, receiptInclude } from "@/server/goods-receipts";
+import { openOrderLines, receivableOrders } from "@/server/purchase-orders";
 import { PageHeader } from "@/components/page-header";
 import { AuditHistory } from "@/components/audit-history";
 import { DocStatusBadge } from "../../_components/doc-status-badge";
@@ -15,13 +16,19 @@ export default async function ReceiptDetailPage({ params }: PageProps<"/inventor
   const user = await requirePagePermission("inventory.receipt", "view");
   const r = await prisma.goodsReceipt.findUnique({ where: { id }, include: receiptInclude });
   if (!r) notFound();
-  const options = await getStockFormOptions();
+  const [options, orderOptions, open] = await Promise.all([
+    getStockFormOptions(),
+    r.status === "DRAFT" ? receivableOrders() : Promise.resolve([]),
+    r.purchaseOrderId ? openOrderLines(r.purchaseOrderId) : Promise.resolve(null),
+  ]);
 
   const view: ReceiptView = {
     id: r.id,
     docNo: r.docNo,
     status: r.status,
     type: r.type,
+    purchaseOrderId: r.purchaseOrderId,
+    orderDocNo: r.order?.docNo ?? null,
     docDate: dateOnlyString(r.docDate),
     warehouseId: r.warehouseId,
     lot: r.lot ?? "",
@@ -30,6 +37,7 @@ export default async function ReceiptDetailPage({ params }: PageProps<"/inventor
       id: l.id,
       productId: l.productId,
       locationId: l.locationId,
+      orderLineId: l.orderLineId,
       note: l.note ?? "",
       serials: l.serials.map((s) => ({ id: s.id, barcode: s.barcode, qty: Number(s.initialQty), scannedAt: s.scannedAt?.toISOString() ?? null })),
     })),
@@ -68,6 +76,8 @@ export default async function ReceiptDetailPage({ params }: PageProps<"/inventor
         options={options}
         canEdit={can(user.permissions, "inventory.receipt", "edit")}
         canCancel={can(user.permissions, "inventory.receipt", "cancel")}
+        orderOptions={orderOptions}
+        orderRemaining={r.status === "DRAFT" && open ? Object.fromEntries(open.lines.map((l) => [l.orderLineId, l.remaining])) : {}}
       />
     </>
   );

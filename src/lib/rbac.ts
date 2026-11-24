@@ -12,9 +12,10 @@ export type GroupPermissionRow = {
   canEdit: boolean;
   canDelete: boolean;
   canCancel: boolean;
+  canApprove: boolean;
 };
 
-export const EMPTY_FLAGS: PermissionFlags = { view: false, create: false, edit: false, delete: false, cancel: false };
+export const EMPTY_FLAGS: PermissionFlags = { view: false, create: false, edit: false, delete: false, cancel: false, approve: false };
 
 /**
  * ทำให้สิทธิ์ของเมนูหนึ่งถูกต้องตามกฎ:
@@ -37,12 +38,13 @@ export function rowToFlags(row: GroupPermissionRow): PermissionFlags {
     edit: row.canEdit,
     delete: row.canDelete,
     cancel: row.canCancel,
+    approve: row.canApprove,
   });
 }
 
 export function flagsToRow(menuKey: string, flags: Partial<PermissionFlags>): GroupPermissionRow {
   const f = normalizeFlags(menuKey, flags);
-  return { menuKey, canView: f.view, canCreate: f.create, canEdit: f.edit, canDelete: f.delete, canCancel: f.cancel };
+  return { menuKey, canView: f.view, canCreate: f.create, canEdit: f.edit, canDelete: f.delete, canCancel: f.cancel, canApprove: f.approve };
 }
 
 /** รวมสิทธิ์จากหลายกลุ่มแบบ OR */

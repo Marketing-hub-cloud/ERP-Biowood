@@ -1,17 +1,16 @@
 import { ApiError, apiHandler } from "@/lib/api";
 import { prisma } from "@/lib/db";
-import { can } from "@/lib/rbac";
+import { canPickContacts } from "@/lib/contact-rules";
 import { formatAddress } from "@/lib/address";
 
 type P = { id: string };
 
 export type ContactAddressOption = { key: string; label: string; recipient: string | null; text: string };
 
-/** ที่อยู่ของผู้ติดต่อ (จดทะเบียน + จัดส่ง) สำหรับเลือกในใบนำออก */
+
+/** ที่อยู่ของผู้ติดต่อ (จดทะเบียน + จัดส่ง) สำหรับเลือกในเอกสาร */
 export const GET = apiHandler<P>({}, async ({ user, params }) => {
-  if (!can(user.permissions, "inventory.issue", "create") && !can(user.permissions, "inventory.issue", "edit")) {
-    throw new ApiError(403, "ไม่มีสิทธิ์ใช้งาน");
-  }
+  if (!canPickContacts(user.permissions)) throw new ApiError(403, "ไม่มีสิทธิ์ใช้งาน");
   const c = await prisma.contact.findFirst({
     where: { id: params.id, deletedAt: null },
     include: { shippingAddresses: { orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }] } },

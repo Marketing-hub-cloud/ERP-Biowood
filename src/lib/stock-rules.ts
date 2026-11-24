@@ -8,9 +8,9 @@ export const MAX_SERIALS_PER_BATCH = 500;
 
 export const RECEIPT_TYPE_LABELS = { PURCHASE: "สั่งซื้อ", OTHER: "อื่นๆ" } as const;
 export const ISSUE_TYPE_LABELS = { SALE: "ขาย", RETURN: "ส่งคืน", SAMPLE: "เบิกตัวอย่าง", OTHER: "อื่นๆ" } as const;
-/** ประเภทที่ยังเปิดใช้ไม่ได้ (ต้องมีเอกสารจัดซื้อจากเฟส 5) */
-export const DISABLED_RECEIPT_TYPES = ["PURCHASE"] as const;
-export const DISABLED_ISSUE_TYPES = ["RETURN"] as const;
+/** ประเภทที่ยังเปิดใช้ไม่ได้ (ว่าง = ใช้ได้ทุกประเภท) */
+export const DISABLED_RECEIPT_TYPES = [] as const;
+export const DISABLED_ISSUE_TYPES = [] as const;
 
 export type StockDocStatus = "DRAFT" | "POSTED" | "CANCELLED";
 export const RECEIPT_STATUS_LABELS: Record<StockDocStatus, string> = { DRAFT: "ร่าง", POSTED: "นำเข้าแล้ว", CANCELLED: "ยกเลิก" };

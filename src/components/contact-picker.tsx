@@ -6,21 +6,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import type { ContactOption } from "@/app/api/inventory/issues/contacts/route";
+import type { ContactOption } from "@/app/api/contact-options/route";
 
 /** เลือกผู้ติดต่อ (ค้นหาจาก server) */
 export function ContactPicker({
   id,
   value,
   onChange,
-  customersOnly,
+  role,
   disabled,
   invalid,
 }: {
   id?: string;
   value: ContactOption | null;
   onChange: (c: ContactOption | null) => void;
-  customersOnly: boolean;
+  /** กรองเฉพาะลูกค้า / ผู้ขาย */
+  role?: "customer" | "vendor" | null;
   disabled?: boolean;
   invalid?: boolean;
 }) {
@@ -35,8 +36,8 @@ export function ContactPicker({
     const t = setTimeout(() => {
       setLoading(true);
       const sp = new URLSearchParams({ q });
-      if (customersOnly) sp.set("customer", "1");
-      fetch(`/api/inventory/issues/contacts?${sp}`, { signal: ctrl.signal })
+      if (role) sp.set(role, "1");
+      fetch(`/api/contact-options?${sp}`, { signal: ctrl.signal })
         .then((r) => (r.ok ? r.json() : []))
         .then((d: ContactOption[]) => setRows(d))
         .catch(() => undefined)
@@ -46,7 +47,7 @@ export function ContactPicker({
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [open, q, customersOnly]);
+  }, [open, q, role]);
 
   return (
     <div className="flex gap-1">
@@ -61,7 +62,7 @@ export function ContactPicker({
             disabled={disabled}
             className={cn("min-w-0 flex-1 justify-between font-normal", !value && "text-muted-foreground")}
           >
-            <span className="truncate">{value ? `${value.code} ${value.name}` : customersOnly ? "- เลือกลูกค้า -" : "- เลือกผู้ติดต่อ (ไม่บังคับ) -"}</span>
+            <span className="truncate">{value ? `${value.code} ${value.name}` : role === "customer" ? "- เลือกลูกค้า -" : role === "vendor" ? "- เลือกผู้ขาย -" : "- เลือกผู้ติดต่อ (ไม่บังคับ) -"}</span>
             <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>

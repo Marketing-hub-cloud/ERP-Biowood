@@ -20,7 +20,7 @@ import { SearchSelect } from "@/components/search-select";
 import { ScanInput } from "@/components/scan-input";
 import { api, ApiClientError, errorMessage } from "@/lib/client-api";
 import { formatNumber } from "@/lib/format";
-import { DISABLED_RECEIPT_TYPES, parseQty, RECEIPT_TYPE_LABELS, sumQty } from "@/lib/stock-rules";
+import { DISABLED_RECEIPT_TYPES, parseQty, RECEIPT_TYPE_LABELS, sumQty, toMilli } from "@/lib/stock-rules";
 import { generateSerialsSchema, receiptSchema } from "@/lib/validators";
 import { descendantIds, flattenTree, type TreeNode } from "@/lib/tree";
 import { cn } from "@/lib/utils";
@@ -28,12 +28,14 @@ import type { StockFormOptions } from "@/server/goods-receipts";
 import { CancelDocDialog } from "../_components/cancel-doc-dialog";
 
 export type SerialView = { id: string; barcode: string; qty: number; scannedAt: string | null };
-export type ReceiptLineView = { id: string; productId: string; locationId: string | null; note: string; serials: SerialView[] };
+export type ReceiptLineView = { id: string; productId: string; locationId: string | null; orderLineId: string | null; note: string; serials: SerialView[] };
 export type ReceiptView = {
   id: string;
   docNo: string;
   status: "DRAFT" | "POSTED" | "CANCELLED";
   type: "PURCHASE" | "OTHER";
+  purchaseOrderId: string | null;
+  orderDocNo: string | null;
   docDate: string;
   warehouseId: string;
   lot: string;
@@ -41,8 +43,21 @@ export type ReceiptView = {
   lines: ReceiptLineView[];
 };
 
-type LineValues = { key: string; id: string | null; productId: string; locationId: string | null; note: string };
-type Values = { type: "PURCHASE" | "OTHER"; docDate: string; warehouseId: string; lot: string; note: string; lines: LineValues[] };
+/** ใบสั่งซื้อที่เลือกได้ (ประเภทสั่งซื้อ) */
+export type OrderOption = { id: string; docNo: string; vendor: string; warehouseId: string | null };
+
+type LineValues = { key: string; id: string | null; productId: string; locationId: string | null; orderLineId: string | null; note: string };
+export type ReceiptValues = {
+  type: "PURCHASE" | "OTHER";
+  purchaseOrderId: string | null;
+  orderDocNo: string | null;
+  docDate: string;
+  warehouseId: string;
+  lot: string;
+  note: string;
+  lines: LineValues[];
+};
+type Values = ReceiptValues;
 
 let keySeq = 0;
 const newKey = () => `n${++keySeq}`;
@@ -51,15 +66,31 @@ const NONE = "__none__";
 function toValues(r: ReceiptView): Values {
   return {
     type: r.type,
+    purchaseOrderId: r.purchaseOrderId,
+    orderDocNo: r.orderDocNo,
     docDate: r.docDate,
     warehouseId: r.warehouseId,
     lot: r.lot,
     note: r.note,
-    lines: r.lines.map((l) => ({ key: l.id, id: l.id, productId: l.productId, locationId: l.locationId, note: l.note })),
+    lines: r.lines.map((l) => ({ key: l.id, id: l.id, productId: l.productId, locationId: l.locationId, orderLineId: l.orderLineId, note: l.note })),
   };
 }
 
-const payload = (v: Values) => ({ ...v, lines: v.lines.map(({ id, productId, locationId, note }) => ({ id, productId, locationId, note })) });
+const payload = (v: Values) => ({
+  type: v.type,
+  purchaseOrderId: v.type === "PURCHASE" ? v.purchaseOrderId : null,
+  docDate: v.docDate,
+  warehouseId: v.warehouseId,
+  lot: v.lot,
+  note: v.note,
+  lines: v.lines.map(({ id, productId, locationId, orderLineId, note }) => ({ id, productId, locationId, orderLineId: v.type === "PURCHASE" ? orderLineId : null, note })),
+});
+
+/** รายการคงค้างของ PO (จาก /api/purchase/orders/options) */
+type OpenOrderResponse = {
+  order: { id: string; docNo: string; warehouseId: string | null };
+  lines: { orderLineId: string; productId: string; productCode: string; unit: string; isStockable: boolean; remaining: number }[];
+};
 
 type Props = {
   receipt: ReceiptView | null;
@@ -68,9 +99,13 @@ type Props = {
   options: StockFormOptions;
   canEdit: boolean;
   canCancel: boolean;
+  /** ใบสั่งซื้อที่เลือกได้ */
+  orderOptions?: OrderOption[];
+  /** คงค้างของแต่ละรายการ PO (orderLineId → จำนวน) */
+  orderRemaining?: Record<string, number>;
 };
 
-export function ReceiptForm({ receipt, defaults, options, canEdit, canCancel }: Props) {
+export function ReceiptForm({ receipt, defaults, options, canEdit, canCancel, orderOptions = [], orderRemaining: initialRemaining = {} }: Props) {
   const router = useRouter();
   const initial = useMemo(() => (receipt ? toValues(receipt) : defaults!), [receipt, defaults]);
   const [v, setV] = useState<Values>(initial);
@@ -82,6 +117,7 @@ export function ReceiptForm({ receipt, defaults, options, canEdit, canCancel }: 
   const [cancelOpen, setCancelOpen] = useState(false);
   const [bulkLocation, setBulkLocation] = useState<string>(NONE);
   const [scanLog, setScanLog] = useState<{ code: string; ok: boolean; msg: string }[]>([]);
+  const [orderRemaining, setOrderRemaining] = useState(initialRemaining);
 
   const isDraft = !receipt || receipt.status === "DRAFT";
   const editable = canEdit && isDraft && !saving;
@@ -216,6 +252,24 @@ export function ReceiptForm({ receipt, defaults, options, canEdit, canCancel }: 
     }
   }
 
+  async function pickOrder(id: string) {
+    try {
+      const o = await api<OpenOrderResponse>(`/api/purchase/orders/options?purpose=receipt&id=${id}`);
+      const open = o.lines.filter((l) => l.isStockable && toMilli(l.remaining) > 0);
+      if (!open.length) toast.warning("ใบสั่งซื้อนี้ไม่มีรายการคงค้างที่สต๊อกได้");
+      setOrderRemaining(Object.fromEntries(o.lines.map((l) => [l.orderLineId, l.remaining])));
+      setV((s) => ({
+        ...s,
+        purchaseOrderId: o.order.id,
+        orderDocNo: o.order.docNo,
+        warehouseId: s.warehouseId || o.order.warehouseId || "",
+        lines: open.map((l) => ({ key: newKey(), id: null, productId: l.productId, locationId: null, orderLineId: l.orderLineId, note: "" })),
+      }));
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
+
   const removeLine = (key: string) => setV((s) => ({ ...s, lines: s.lines.filter((l) => l.key !== key) }));
   const err = (k: string) => errors[k];
   const lineErr = (i: number, f: string) => errors[`lines.${i}.${f}`];
@@ -235,7 +289,20 @@ export function ReceiptForm({ receipt, defaults, options, canEdit, canCancel }: 
             <DocNumberField prefix="GR" value={receipt?.docNo} />
           </FormField>
           <FormField label="ประเภท" htmlFor="type" required error={err("type")}>
-            <Select value={v.type} onValueChange={(x) => set("type", x as Values["type"])} disabled={!editable}>
+            <Select
+              value={v.type}
+              onValueChange={(x) =>
+                setV((s) => ({
+                  ...s,
+                  type: x as Values["type"],
+                  purchaseOrderId: null,
+                  orderDocNo: null,
+                  // เปลี่ยนประเภท: รายการแบบสั่งซื้อต้องมาจาก PO
+                  lines: x === "PURCHASE" ? [] : s.lines.map((l) => ({ ...l, orderLineId: null })),
+                }))
+              }
+              disabled={!editable || allSerials.length > 0}
+            >
               <SelectTrigger id="type" className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -249,6 +316,21 @@ export function ReceiptForm({ receipt, defaults, options, canEdit, canCancel }: 
               </SelectContent>
             </Select>
           </FormField>
+          {v.type === "PURCHASE" && (
+            <FormField label="ใบสั่งซื้อ" htmlFor="purchaseOrderId" required error={err("purchaseOrderId")}>
+              {!editable || allSerials.length > 0 ? (
+                <Input id="purchaseOrderId" value={v.orderDocNo ?? ""} readOnly className="font-mono" />
+              ) : (
+                <SearchSelect
+                  id="purchaseOrderId"
+                  value={v.purchaseOrderId}
+                  onChange={pickOrder}
+                  options={orderOptions.map((o) => ({ value: o.id, label: o.docNo, hint: o.vendor }))}
+                  placeholder="- เลือกใบสั่งซื้อที่อนุมัติแล้ว -"
+                />
+              )}
+            </FormField>
+          )}
           <FormField label="วันที่เอกสาร" htmlFor="docDate" required error={err("docDate")}>
             <DateField id="docDate" value={v.docDate} onChange={(x) => set("docDate", x)} disabled={!editable} />
           </FormField>
@@ -325,7 +407,11 @@ export function ReceiptForm({ receipt, defaults, options, canEdit, canCancel }: 
         </CardHeader>
         <CardContent className="space-y-3">
           {errors.lines && <p className="text-sm text-destructive">{errors.lines}</p>}
-          {v.lines.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">ยังไม่มีรายการ กด &quot;เพิ่มรายการ&quot; เพื่อเลือกสินค้า</p>}
+          {v.lines.length === 0 && (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              {v.type === "PURCHASE" ? "เลือกใบสั่งซื้อ ระบบจะดึงรายการคงค้างมาให้" : <>ยังไม่มีรายการ กด &quot;เพิ่มรายการ&quot; เพื่อเลือกสินค้า</>}
+            </p>
+          )}
           {v.lines.map((l, i) => {
             const p = productMap.get(l.productId);
             const ss = (l.id && serials[l.id]) || [];
@@ -344,9 +430,18 @@ export function ReceiptForm({ receipt, defaults, options, canEdit, canCancel }: 
                       onChange={(x) => setLine(l.key, { productId: x })}
                       options={productOpts}
                       placeholder="- เลือกสินค้า -"
-                      disabled={!editable || ss.length > 0}
+                      disabled={!editable || ss.length > 0 || Boolean(l.orderLineId)}
                       aria-invalid={Boolean(lineErr(i, "productId"))}
                     />
+                    {l.orderLineId && orderRemaining[l.orderLineId] !== undefined && (
+                      <p
+                        className={cn("mt-1 text-xs", toMilli(qty) > toMilli(orderRemaining[l.orderLineId]) ? "text-destructive" : "text-muted-foreground")}
+                        data-testid="po-remaining"
+                      >
+                        คงค้างตามใบสั่งซื้อ {formatNumber(orderRemaining[l.orderLineId])} {p?.unit}
+                        {toMilli(qty) > toMilli(orderRemaining[l.orderLineId]) && " — SN รวมเกินคงค้าง"}
+                      </p>
+                    )}
                   </FormField>
                   <FormField label="สถานที่จัดเก็บ" htmlFor={`location-${l.key}`} error={lineErr(i, "locationId")}>
                     <Select value={l.locationId ?? NONE} onValueChange={(x) => setLine(l.key, { locationId: x === NONE ? null : x })} disabled={!editable || !v.warehouseId}>
@@ -466,8 +561,12 @@ export function ReceiptForm({ receipt, defaults, options, canEdit, canCancel }: 
               </div>
             );
           })}
-          {editable && (
-            <Button type="button" variant="outline" onClick={() => setV((s) => ({ ...s, lines: [...s.lines, { key: newKey(), id: null, productId: "", locationId: null, note: "" }] }))}>
+          {editable && v.type === "OTHER" && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setV((s) => ({ ...s, lines: [...s.lines, { key: newKey(), id: null, productId: "", locationId: null, orderLineId: null, note: "" }] }))}
+            >
               <Plus /> เพิ่มรายการ
             </Button>
           )}

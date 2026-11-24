@@ -10,6 +10,7 @@ describe("normalizeFlags", () => {
       edit: false,
       delete: false,
       cancel: false,
+      approve: false,
     });
   });
 
@@ -20,7 +21,13 @@ describe("normalizeFlags", () => {
       edit: false,
       delete: false,
       cancel: false,
+      approve: false,
     });
+  });
+
+  it("สิทธิ์อนุมัติมีเฉพาะเมนูเอกสารที่ผ่าน approval engine", () => {
+    expect(normalizeFlags("purchase.order", { view: true, approve: true }).approve).toBe(true);
+    expect(normalizeFlags("inventory.receipt", { view: true, approve: true }).approve).toBe(false);
   });
 
   it("menuKey ที่ไม่รู้จักได้สิทธิ์ว่าง", () => {
@@ -34,17 +41,17 @@ describe("mergePermissions (หลายกลุ่มรวมแบบ OR)", 
     const groupB = flagsToRow("purchase.request", { view: true, edit: true });
     const groupC = flagsToRow("purchase.order", { view: true });
     const map = mergePermissions([groupA, groupB, groupC]);
-    expect(map["purchase.request"]).toEqual({ view: true, create: true, edit: true, delete: false, cancel: false });
+    expect(map["purchase.request"]).toEqual({ view: true, create: true, edit: true, delete: false, cancel: false, approve: false });
     expect(map["purchase.order"].view).toBe(true);
   });
 
   it("แถวที่บันทึกไม่ถูกกฎ (view ปิดแต่ create เปิด) ต้องไม่ได้สิทธิ์", () => {
-    const map = mergePermissions([{ menuKey: "purchase.request", canView: false, canCreate: true, canEdit: false, canDelete: false, canCancel: false }]);
+    const map = mergePermissions([{ menuKey: "purchase.request", canView: false, canCreate: true, canEdit: false, canDelete: false, canCancel: false, canApprove: false }]);
     expect(can(map, "purchase.request", "create")).toBe(false);
   });
 
   it("ข้าม menuKey ที่ไม่รู้จัก", () => {
-    const map = mergePermissions([{ menuKey: "hack.menu", canView: true, canCreate: true, canEdit: true, canDelete: true, canCancel: true }]);
+    const map = mergePermissions([{ menuKey: "hack.menu", canView: true, canCreate: true, canEdit: true, canDelete: true, canCancel: true, canApprove: true }]);
     expect(map["hack.menu"]).toBeUndefined();
   });
 });

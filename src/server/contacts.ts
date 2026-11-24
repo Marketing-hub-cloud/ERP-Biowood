@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma, type TxClient } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
-import { ApiError } from "@/lib/api";
+import { ApiError } from "@/lib/errors";
 import { allocateRunningCode } from "@/lib/doc-number";
 import { formatAddress } from "@/lib/address";
 import { canOnContact, checkRoleChange, rolesWith } from "@/lib/contact-rules";

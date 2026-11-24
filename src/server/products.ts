@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma, type TxClient } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
-import { ApiError } from "@/lib/api";
+import { ApiError } from "@/lib/errors";
 import { pathLabel, type TreeNode } from "@/lib/tree";
 import { normalizeAttributeValue, validateAttributeValues, type AttributeDef } from "@/lib/product-rules";
 import type { ProductData } from "@/lib/validators";

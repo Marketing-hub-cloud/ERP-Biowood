@@ -1,11 +1,12 @@
 import "server-only";
 import { prisma, type TxClient } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
-import { ApiError } from "@/lib/api";
+import { ApiError } from "@/lib/errors";
 import { allocateDocNumber, DOC_PREFIXES } from "@/lib/doc-number";
 import { formatDate, formatNumber } from "@/lib/format";
 import { cancelIssue, postIssue, serialBalances, STOCK_TX } from "@/lib/stock-ledger";
-import { checkIssueQuantities, dateOnly, ISSUE_STATUS_LABELS, ISSUE_TYPE_LABELS } from "@/lib/stock-rules";
+import { checkIssueQuantities, dateOnly, ISSUE_STATUS_LABELS, ISSUE_TYPE_LABELS, toMilli } from "@/lib/stock-rules";
+import { rtLineIssued } from "@/lib/purchase-status";
 import { pathLabel, type TreeNode } from "@/lib/tree";
 import type { IssueData } from "@/lib/validators";
 import type { CurrentUser } from "@/lib/session";
@@ -15,6 +16,7 @@ export const ENTITY_ISSUE = "GoodsIssue";
 
 export const issueInclude = {
   contact: { select: { id: true, code: true, name: true, isCustomer: true, isVendor: true } },
+  purchaseReturn: { select: { id: true, docNo: true } },
   createdBy: { select: { firstName: true, lastName: true } },
   postedBy: { select: { firstName: true, lastName: true } },
   cancelledBy: { select: { firstName: true, lastName: true } },
@@ -40,6 +42,7 @@ async function snapshot(tx: TxClient, id: string) {
     type: ISSUE_TYPE_LABELS[d.type],
     docDate: formatDate(d.docDate),
     contact: d.contact ? `${d.contact.code} ${d.contact.name}` : null,
+    purchaseReturn: d.purchaseReturn?.docNo ?? null,
     recipientName: d.recipientName,
     shippingAddress: d.shippingAddress,
     note: d.note,
@@ -86,8 +89,18 @@ export async function lookupSerial(barcode: string): Promise<SerialInfo> {
 }
 
 /** ตรวจผู้ติดต่อ + SN + จำนวน (ยอดตรวจซ้ำแบบ lock ตอนนำออกจริง) */
-async function assertRefs(tx: TxClient, d: IssueData) {
-  if (d.type === "RETURN") throw new ApiError(400, "การนำออกแบบส่งคืนจะเปิดใช้ในระบบจัดซื้อ", { type: "ยังไม่เปิดใช้" });
+async function assertRefs(tx: TxClient, d: IssueData, currentReturnId?: string | null) {
+  const rt =
+    d.type === "RETURN" && d.purchaseReturnId
+      ? await tx.purchaseReturn.findUnique({ where: { id: d.purchaseReturnId }, include: { lines: { orderBy: { lineNo: "asc" }, include: { product: true } } } })
+      : null;
+  if (d.type === "RETURN") {
+    const ok = rt && (rt.status === "APPROVED" || rt.status === "PARTIAL" || (rt.status === "COMPLETED" && rt.id === currentReturnId));
+    if (!rt || !ok) throw new ApiError(400, "ใบส่งคืนนี้ยังไม่อนุมัติ ถูกยกเลิก หรือส่งคืนครบแล้ว", { purchaseReturnId: "ใบส่งคืนไม่ถูกต้อง" });
+    d.contactId = rt.vendorId; // ผู้รับ = ผู้ขายของใบส่งคืน
+  } else {
+    d.purchaseReturnId = null;
+  }
   if (d.contactId) {
     const c = await tx.contact.findFirst({ where: { id: d.contactId, deletedAt: null } });
     if (!c) throw new ApiError(400, "ไม่พบผู้ติดต่อ", { contactId: "ไม่พบผู้ติดต่อ" });
@@ -104,10 +117,35 @@ async function assertRefs(tx: TxClient, d: IssueData) {
     else if (qtyErr[l.serialId]) fields[`lines.${i}.quantity`] = `${s.barcode}: ${qtyErr[l.serialId]}`;
   });
   if (Object.keys(fields).length) throw new ApiError(400, Object.values(fields)[0], fields);
-  return serials;
+
+  // ส่งคืน: จับคู่แต่ละ SN กับรายการในใบส่งคืนที่เป็นสินค้าเดียวกันและยังคืนได้พอ
+  const returnAlloc = new Map<string, string>();
+  if (rt) {
+    const issued = await rtLineIssued(tx, rt.lines.map((l) => l.id));
+    const left = new Map(rt.lines.map((l) => [l.id, toMilli(l.quantity.toString()) - toMilli(issued.get(l.id) ?? 0)]));
+    d.lines.forEach((l, i) => {
+      const s = serials.find((x) => x.id === l.serialId)!;
+      const candidates = rt.lines.filter((rl) => rl.productId === s.productId);
+      if (!candidates.length) {
+        fields[`lines.${i}.quantity`] = `${s.barcode}: สินค้านี้ไม่อยู่ในใบส่งคืน`;
+        return;
+      }
+      const rl = candidates.find((c) => (left.get(c.id) ?? 0) >= toMilli(l.quantity));
+      if (!rl) {
+        const remain = candidates.reduce((n, c) => n + (left.get(c.id) ?? 0), 0) / 1000;
+        fields[`lines.${i}.quantity`] = `${s.barcode}: เกินจำนวนที่ต้องส่งคืน (คงค้าง ${formatNumber(remain)})`;
+        return;
+      }
+      left.set(rl.id, (left.get(rl.id) ?? 0) - toMilli(l.quantity));
+      returnAlloc.set(l.serialId, rl.id);
+    });
+    if (Object.keys(fields).length) throw new ApiError(400, Object.values(fields)[0], fields);
+  }
+  return { serials, returnAlloc };
 }
 
-async function writeLines(tx: TxClient, issueId: string, d: IssueData, serials: { id: string; productId: string }[]) {
+async function writeLines(tx: TxClient, issueId: string, d: IssueData, refs: { serials: { id: string; productId: string }[]; returnAlloc: Map<string, string> }) {
+  const { serials, returnAlloc } = refs;
   await tx.goodsIssueLine.deleteMany({ where: { issueId } });
   await tx.goodsIssueLine.createMany({
     data: d.lines.map((l, i) => ({
@@ -116,6 +154,7 @@ async function writeLines(tx: TxClient, issueId: string, d: IssueData, serials: 
       serialId: l.serialId,
       productId: serials.find((s) => s.id === l.serialId)!.productId,
       quantity: l.quantity,
+      returnLineId: returnAlloc.get(l.serialId) ?? null,
       note: l.note,
     })),
   });
@@ -125,6 +164,7 @@ const header = (d: IssueData) => ({
   type: d.type,
   docDate: dateOnly(d.docDate),
   contactId: d.contactId,
+  purchaseReturnId: d.type === "RETURN" ? d.purchaseReturnId : null,
   recipientName: d.recipientName,
   shippingAddress: d.shippingAddress,
   note: d.note,
@@ -133,10 +173,10 @@ const header = (d: IssueData) => ({
 /** สร้างใบนำออก — post = true จะนำออกทันทีใน transaction เดียวกัน (ไม่สำเร็จ = ไม่บันทึกอะไรเลย) */
 export async function createIssue(actor: CurrentUser, d: IssueData, post: boolean, ip: string | null) {
   return prisma.$transaction(async (tx) => {
-    const serials = await assertRefs(tx, d);
+    const refs = await assertRefs(tx, d);
     const docNo = await allocateDocNumber(tx, DOC_PREFIXES.GOODS_ISSUE);
     const doc = await tx.goodsIssue.create({ data: { ...header(d), docNo, createdById: actor.id } });
-    await writeLines(tx, doc.id, d, serials);
+    await writeLines(tx, doc.id, d, refs);
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_ISSUE, entityId: doc.id, action: "CREATE", after: await snapshot(tx, doc.id), ip });
     if (post) await postAndAudit(tx, actor, doc.id, ip);
     return doc;
@@ -148,10 +188,11 @@ export async function updateIssue(actor: CurrentUser, id: string, d: IssueData, 
     const rows = await tx.$queryRaw<{ status: string }[]>`SELECT status::text AS status FROM goods_issues WHERE id = ${id} FOR UPDATE`;
     if (!rows[0]) throw new ApiError(404, "ไม่พบใบนำออก");
     if (rows[0].status !== "DRAFT") throw new ApiError(409, "แก้ไขได้เฉพาะใบนำออกที่เป็นร่าง");
-    const serials = await assertRefs(tx, d);
+    const cur = await tx.goodsIssue.findUniqueOrThrow({ where: { id }, select: { purchaseReturnId: true } });
+    const refs = await assertRefs(tx, d, cur.purchaseReturnId);
     const before = await snapshot(tx, id);
     await tx.goodsIssue.update({ where: { id }, data: { ...header(d), updatedById: actor.id } });
-    await writeLines(tx, id, d, serials);
+    await writeLines(tx, id, d, refs);
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_ISSUE, entityId: id, action: "UPDATE", before, after: await snapshot(tx, id), ip });
     if (post) await postAndAudit(tx, actor, id, ip);
   }, STOCK_TX);

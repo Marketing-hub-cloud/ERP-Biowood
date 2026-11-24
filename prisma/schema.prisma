@@ -45,6 +45,16 @@ model User {
   issuesCancelled   GoodsIssue[]    @relation("IssueCancelledBy")
   movements         StockMovement[] @relation("MovementCreatedBy")
 
+  prRequested     PurchaseRequest[]      @relation("PrRequester")
+  prCreated       PurchaseRequest[]      @relation("PrCreatedBy")
+  prCancelled     PurchaseRequest[]      @relation("PrCancelledBy")
+  poCreated       PurchaseOrder[]        @relation("PoCreatedBy")
+  poCancelled     PurchaseOrder[]        @relation("PoCancelledBy")
+  rtCreated       PurchaseReturn[]       @relation("RtCreatedBy")
+  rtCancelled     PurchaseReturn[]       @relation("RtCancelledBy")
+  approvalSteps   ApprovalStepApprover[] @relation("ApprovalStepUser")
+  approvalActions ApprovalAction[]       @relation("ApprovalActionActor")
+
   @@map("users")
 }
 
@@ -64,13 +74,14 @@ model PermissionGroup {
 }
 
 model GroupPermission {
-  groupId   String
-  menuKey   String // ดูรายการเมนูใน src/lib/menu.ts
-  canView   Boolean @default(false)
-  canCreate Boolean @default(false)
-  canEdit   Boolean @default(false)
-  canDelete Boolean @default(false)
-  canCancel Boolean @default(false)
+  groupId    String
+  menuKey    String // ดูรายการเมนูใน src/lib/menu.ts
+  canView    Boolean @default(false)
+  canCreate  Boolean @default(false)
+  canEdit    Boolean @default(false)
+  canDelete  Boolean @default(false)
+  canCancel  Boolean @default(false)
+  canApprove Boolean @default(false)
 
   group PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
@@ -173,6 +184,7 @@ enum LookupKind {
   CONTACT_SOURCE // ช่องทางที่รู้จัก
   CUSTOMER_BUSINESS_TYPE // ประเภทกิจการของลูกค้า
   PRODUCT_TYPE // ประเภทสินค้า
+  RETURN_REASON // เหตุผลการส่งคืนสินค้า (จัดซื้อ)
 }
 
 model Contact {
@@ -213,6 +225,8 @@ model Contact {
   persons              ContactPerson[]
   tags                 ContactTag[]
   goodsIssues          GoodsIssue[]
+  purchaseOrders       PurchaseOrder[]  @relation("PoVendor")
+  purchaseReturns      PurchaseReturn[] @relation("RtVendor")
 
   @@index([isCustomer, deletedAt])
   @@index([isVendor, deletedAt])
@@ -309,9 +323,10 @@ model LookupOption {
   isActive  Boolean    @default(true)
   createdAt DateTime   @default(now())
 
-  contactsAsSource       Contact[] @relation("ContactSource")
-  contactsAsBusinessType Contact[] @relation("ContactBusinessType")
-  products               Product[] @relation("ProductType")
+  contactsAsSource       Contact[]        @relation("ContactSource")
+  contactsAsBusinessType Contact[]        @relation("ContactBusinessType")
+  products               Product[]        @relation("ProductType")
+  purchaseReturns        PurchaseReturn[] @relation("ReturnReason")
 
   @@unique([kind, label])
   @@map("lookup_options")
@@ -346,6 +361,8 @@ model StockLocation {
   serialsLocation    StockSerial[]      @relation("SerialLocation")
   movementsWarehouse StockMovement[]    @relation("MovementWarehouse")
   movementsLocation  StockMovement[]    @relation("MovementLocation")
+  purchaseRequests   PurchaseRequest[]  @relation("PrWarehouse")
+  purchaseOrders     PurchaseOrder[]    @relation("PoWarehouse")
 
   @@unique([parentId, code])
   @@index([parentId])
@@ -426,6 +443,9 @@ model Product {
   issueLines      GoodsIssueLine[]
   serials         StockSerial[]
   movements       StockMovement[]
+  prLines         PurchaseRequestLine[]
+  poLines         PurchaseOrderLine[]
+  rtLines         PurchaseReturnLine[]
 
   @@index([categoryId])
   @@index([name])
@@ -487,29 +507,31 @@ enum MovementType {
 
 /// ใบนำเข้า (GR)
 model GoodsReceipt {
-  id            String           @id @default(cuid())
-  docNo         String           @unique
-  type          GoodsReceiptType @default(OTHER)
-  docDate       DateTime         @db.Date
-  warehouseId   String
-  lot           String?
-  note          String?
-  status        StockDocStatus   @default(DRAFT)
-  postedAt      DateTime?
-  postedById    String?
-  cancelledAt   DateTime?
-  cancelledById String?
-  cancelReason  String?
-  createdById   String
-  updatedById   String?
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  id              String           @id @default(cuid())
+  docNo           String           @unique
+  type            GoodsReceiptType @default(OTHER)
+  docDate         DateTime         @db.Date
+  warehouseId     String
+  purchaseOrderId String? // ประเภท "สั่งซื้อ"
+  lot             String?
+  note            String?
+  status          StockDocStatus   @default(DRAFT)
+  postedAt        DateTime?
+  postedById      String?
+  cancelledAt     DateTime?
+  cancelledById   String?
+  cancelReason    String?
+  createdById     String
+  updatedById     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   warehouse   StockLocation      @relation("ReceiptWarehouse", fields: [warehouseId], references: [id])
   createdBy   User               @relation("ReceiptCreatedBy", fields: [createdById], references: [id])
   postedBy    User?              @relation("ReceiptPostedBy", fields: [postedById], references: [id])
   cancelledBy User?              @relation("ReceiptCancelledBy", fields: [cancelledById], references: [id])
   lines       GoodsReceiptLine[]
+  order       PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
 
   @@index([status, docDate])
   @@index([warehouseId])
@@ -517,17 +539,19 @@ model GoodsReceipt {
 }
 
 model GoodsReceiptLine {
-  id         String  @id @default(cuid())
-  receiptId  String
-  lineNo     Int
-  productId  String
-  locationId String? // ต้องเลือกก่อนกด "นำเข้า"
-  note       String?
+  id          String  @id @default(cuid())
+  receiptId   String
+  lineNo      Int
+  productId   String
+  locationId  String? // ต้องเลือกก่อนกด "นำเข้า"
+  orderLineId String? // รายการ PO ที่รับ (ประเภท "สั่งซื้อ")
+  note        String?
 
-  receipt  GoodsReceipt   @relation(fields: [receiptId], references: [id], onDelete: Cascade)
-  product  Product        @relation(fields: [productId], references: [id])
-  location StockLocation? @relation("ReceiptLineLocation", fields: [locationId], references: [id])
-  serials  StockSerial[]
+  orderLine PurchaseOrderLine? @relation(fields: [orderLineId], references: [id])
+  receipt   GoodsReceipt       @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  product   Product            @relation(fields: [productId], references: [id])
+  location  StockLocation?     @relation("ReceiptLineLocation", fields: [locationId], references: [id])
+  serials   StockSerial[]
 
   @@index([receiptId])
   @@index([productId])
@@ -564,30 +588,32 @@ model StockSerial {
 
 /// ใบนำออก (GI)
 model GoodsIssue {
-  id              String         @id @default(cuid())
-  docNo           String         @unique
-  type            GoodsIssueType
-  docDate         DateTime       @db.Date
-  contactId       String?
-  recipientName   String?
-  shippingAddress String?
-  note            String?
-  status          StockDocStatus @default(DRAFT)
-  postedAt        DateTime?
-  postedById      String?
-  cancelledAt     DateTime?
-  cancelledById   String?
-  cancelReason    String?
-  createdById     String
-  updatedById     String?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id               String         @id @default(cuid())
+  docNo            String         @unique
+  type             GoodsIssueType
+  docDate          DateTime       @db.Date
+  contactId        String?
+  purchaseReturnId String? // ประเภท "ส่งคืน"
+  recipientName    String?
+  shippingAddress  String?
+  note             String?
+  status           StockDocStatus @default(DRAFT)
+  postedAt         DateTime?
+  postedById       String?
+  cancelledAt      DateTime?
+  cancelledById    String?
+  cancelReason     String?
+  createdById      String
+  updatedById      String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
-  contact     Contact?         @relation(fields: [contactId], references: [id])
-  createdBy   User             @relation("IssueCreatedBy", fields: [createdById], references: [id])
-  postedBy    User?            @relation("IssuePostedBy", fields: [postedById], references: [id])
-  cancelledBy User?            @relation("IssueCancelledBy", fields: [cancelledById], references: [id])
-  lines       GoodsIssueLine[]
+  contact        Contact?         @relation(fields: [contactId], references: [id])
+  createdBy      User             @relation("IssueCreatedBy", fields: [createdById], references: [id])
+  postedBy       User?            @relation("IssuePostedBy", fields: [postedById], references: [id])
+  cancelledBy    User?            @relation("IssueCancelledBy", fields: [cancelledById], references: [id])
+  lines          GoodsIssueLine[]
+  purchaseReturn PurchaseReturn?  @relation(fields: [purchaseReturnId], references: [id])
 
   @@index([status, docDate])
   @@index([contactId])
@@ -595,17 +621,19 @@ model GoodsIssue {
 }
 
 model GoodsIssueLine {
-  id        String  @id @default(cuid())
-  issueId   String
-  lineNo    Int
-  serialId  String
-  productId String
-  quantity  Decimal @db.Decimal(14, 3)
-  note      String?
+  id           String  @id @default(cuid())
+  issueId      String
+  lineNo       Int
+  serialId     String
+  productId    String
+  quantity     Decimal @db.Decimal(14, 3)
+  returnLineId String? // รายการใบส่งคืน (ประเภท "ส่งคืน")
+  note         String?
 
-  issue   GoodsIssue  @relation(fields: [issueId], references: [id], onDelete: Cascade)
-  serial  StockSerial @relation(fields: [serialId], references: [id])
-  product Product     @relation(fields: [productId], references: [id])
+  returnLine PurchaseReturnLine? @relation(fields: [returnLineId], references: [id])
+  issue      GoodsIssue          @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  serial     StockSerial         @relation(fields: [serialId], references: [id])
+  product    Product             @relation(fields: [productId], references: [id])
 
   @@unique([issueId, serialId])
   @@index([serialId])
@@ -642,4 +670,264 @@ model StockMovement {
   @@index([refType, refId])
   @@index([occurredAt])
   @@map("stock_movements")
+}
+
+// ───────────────────────── เฟส 5: จัดซื้อ + Approval engine ─────────────────────────
+
+/// สถานะเอกสารที่ผ่าน approval engine
+/// PARTIAL/COMPLETED แสดงตามชนิด: PR สั่งซื้อแล้ว(บางส่วน), PO นำเข้าแล้ว(บางส่วน), RT ส่งคืนแล้ว(บางส่วน)
+enum PurchaseStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  PARTIAL
+  COMPLETED
+  CANCELLED
+}
+
+enum VatMode {
+  EXCLUSIVE // แยกนอก
+  INCLUSIVE // รวมใน
+  NONE // ไม่มี VAT
+}
+
+enum ApprovalActionType {
+  SUBMIT
+  APPROVE
+  REJECT
+  CANCEL
+}
+
+/// ผังอนุมัติ: docType "PR" | "PO" | "RT" (ใช้กับโมดูลอื่นได้) ลำดับ 1..3
+model ApprovalStep {
+  id      String @id @default(cuid())
+  docType String
+  stepNo  Int
+
+  approvers ApprovalStepApprover[]
+
+  @@unique([docType, stepNo])
+  @@map("approval_steps")
+}
+
+model ApprovalStepApprover {
+  stepId String
+  userId String
+
+  step ApprovalStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  user User         @relation("ApprovalStepUser", fields: [userId], references: [id])
+
+  @@id([stepId, userId])
+  @@map("approval_step_approvers")
+}
+
+/// ประวัติการส่ง/อนุมัติ/ไม่อนุมัติ/ยกเลิก ของเอกสาร (อ้างด้วย docType + docId)
+model ApprovalAction {
+  id        String             @id @default(cuid())
+  docType   String
+  docId     String
+  round     Int
+  stepNo    Int?
+  action    ApprovalActionType
+  actorId   String
+  comment   String?
+  createdAt DateTime           @default(now())
+
+  actor User @relation("ApprovalActionActor", fields: [actorId], references: [id])
+
+  @@index([docType, docId])
+  @@map("approval_actions")
+}
+
+/// ใบขอซื้อ (PR)
+model PurchaseRequest {
+  id               String         @id @default(cuid())
+  docNo            String         @unique
+  status           PurchaseStatus @default(DRAFT)
+  docDate          DateTime       @db.Date
+  requiredDate     DateTime?      @db.Date
+  requesterId      String
+  department       String?
+  position         String?
+  reference        String?
+  warehouseId      String?
+  note             String?
+  // approval
+  approvalSnapshot Json?
+  currentStep      Int?
+  approvalRound    Int            @default(0)
+  submittedAt      DateTime?
+  approvedAt       DateTime?
+  cancelledAt      DateTime?
+  cancelledById    String?
+  cancelReason     String?
+  createdById      String
+  updatedById      String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  requester   User                  @relation("PrRequester", fields: [requesterId], references: [id])
+  createdBy   User                  @relation("PrCreatedBy", fields: [createdById], references: [id])
+  cancelledBy User?                 @relation("PrCancelledBy", fields: [cancelledById], references: [id])
+  warehouse   StockLocation?        @relation("PrWarehouse", fields: [warehouseId], references: [id])
+  lines       PurchaseRequestLine[]
+
+  @@index([status, docDate])
+  @@map("purchase_requests")
+}
+
+model PurchaseRequestLine {
+  id        String  @id @default(cuid())
+  requestId String
+  lineNo    Int
+  productId String
+  quantity  Decimal @db.Decimal(14, 3)
+  note      String?
+
+  request    PurchaseRequest     @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  product    Product             @relation(fields: [productId], references: [id])
+  orderLines PurchaseOrderLine[]
+
+  @@index([requestId])
+  @@map("purchase_request_lines")
+}
+
+/// ใบสั่งซื้อ (PO)
+model PurchaseOrder {
+  id               String         @id @default(cuid())
+  docNo            String         @unique
+  status           PurchaseStatus @default(DRAFT)
+  docDate          DateTime       @db.Date
+  deliveryDate     DateTime?      @db.Date
+  vendorId         String
+  paymentTerms     String?
+  reference        String?
+  warehouseId      String?
+  note             String?
+  vatMode          VatMode        @default(EXCLUSIVE)
+  vatRate          Decimal        @default(7) @db.Decimal(5, 2)
+  headerDiscount   Decimal        @default(0) @db.Decimal(14, 2)
+  // คำนวณที่ server แล้วเก็บไว้ (ดู src/lib/purchase-calc.ts)
+  subtotal         Decimal        @default(0) @db.Decimal(14, 2)
+  vatAmount        Decimal        @default(0) @db.Decimal(14, 2)
+  total            Decimal        @default(0) @db.Decimal(14, 2)
+  // approval
+  approvalSnapshot Json?
+  currentStep      Int?
+  approvalRound    Int            @default(0)
+  submittedAt      DateTime?
+  approvedAt       DateTime?
+  cancelledAt      DateTime?
+  cancelledById    String?
+  cancelReason     String?
+  createdById      String
+  updatedById      String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  vendor      Contact             @relation("PoVendor", fields: [vendorId], references: [id])
+  createdBy   User                @relation("PoCreatedBy", fields: [createdById], references: [id])
+  cancelledBy User?               @relation("PoCancelledBy", fields: [cancelledById], references: [id])
+  warehouse   StockLocation?      @relation("PoWarehouse", fields: [warehouseId], references: [id])
+  lines       PurchaseOrderLine[]
+  receipts    GoodsReceipt[]
+  returns     PurchaseReturn[]
+
+  @@index([status, docDate])
+  @@index([vendorId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderLine {
+  id            String  @id @default(cuid())
+  orderId       String
+  lineNo        Int
+  productId     String
+  requestLineId String?
+  quantity      Decimal @db.Decimal(14, 3)
+  unitPrice     Decimal @db.Decimal(14, 4)
+  discount      Decimal @default(0) @db.Decimal(14, 2)
+  amount        Decimal @db.Decimal(14, 2)
+  note          String?
+
+  order        PurchaseOrder        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product      Product              @relation(fields: [productId], references: [id])
+  requestLine  PurchaseRequestLine? @relation(fields: [requestLineId], references: [id])
+  receiptLines GoodsReceiptLine[]
+  returnLines  PurchaseReturnLine[]
+
+  @@index([orderId])
+  @@index([requestLineId])
+  @@map("purchase_order_lines")
+}
+
+/// ใบส่งคืน (RT) — คืนสินค้าให้ผู้ขาย สร้างจาก PO
+model PurchaseReturn {
+  id               String         @id @default(cuid())
+  docNo            String         @unique
+  status           PurchaseStatus @default(DRAFT)
+  docDate          DateTime       @db.Date
+  orderId          String
+  vendorId         String
+  reasonId         String
+  note             String?
+  // approval
+  approvalSnapshot Json?
+  currentStep      Int?
+  approvalRound    Int            @default(0)
+  submittedAt      DateTime?
+  approvedAt       DateTime?
+  cancelledAt      DateTime?
+  cancelledById    String?
+  cancelReason     String?
+  createdById      String
+  updatedById      String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  order       PurchaseOrder        @relation(fields: [orderId], references: [id])
+  vendor      Contact              @relation("RtVendor", fields: [vendorId], references: [id])
+  reason      LookupOption         @relation("ReturnReason", fields: [reasonId], references: [id])
+  createdBy   User                 @relation("RtCreatedBy", fields: [createdById], references: [id])
+  cancelledBy User?                @relation("RtCancelledBy", fields: [cancelledById], references: [id])
+  lines       PurchaseReturnLine[]
+  issues      GoodsIssue[]
+
+  @@index([status, docDate])
+  @@index([orderId])
+  @@map("purchase_returns")
+}
+
+model PurchaseReturnLine {
+  id          String  @id @default(cuid())
+  returnId    String
+  lineNo      Int
+  orderLineId String
+  productId   String
+  quantity    Decimal @db.Decimal(14, 3)
+  note        String?
+
+  purchaseReturn PurchaseReturn    @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  orderLine      PurchaseOrderLine @relation(fields: [orderLineId], references: [id])
+  product        Product           @relation(fields: [productId], references: [id])
+  issueLines     GoodsIssueLine[]
+
+  @@index([returnId])
+  @@index([orderLineId])
+  @@map("purchase_return_lines")
+}
+
+/// หมายเหตุสำเร็จรูป แยกตามโมดูล (เช่น "purchase")
+model NoteTemplate {
+  id        String   @id @default(cuid())
+  module    String
+  title     String
+  body      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([module])
+  @@map("note_templates")
 }

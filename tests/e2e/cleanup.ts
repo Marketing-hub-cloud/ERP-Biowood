@@ -74,7 +74,44 @@ export async function cleanupTestData(): Promise<Record<string, number>> {
       await c.query(`DELETE FROM stock_serials WHERE "receiptLineId" IN (SELECT id FROM goods_receipt_lines WHERE "receiptId" = ANY($1))`, [receipts]);
       n.receipts = (await c.query(`DELETE FROM goods_receipts WHERE id = ANY($1)`, [receipts])).rowCount ?? 0;
 
-      const all = [...users, ...groups, ...contacts, ...products, ...attributes, ...units, ...categories, ...locations, ...receipts, ...issues];
+      // เอกสารจัดซื้อ (เฟส 5): อ้างอิงสินค้า/ผู้ขาย/ผู้ใช้ทดสอบ (ใบนำเข้า/นำออกที่อ้างอิงถูกลบไปแล้วข้างบน)
+      const returns = await ids(
+        c,
+        `SELECT id FROM purchase_returns r WHERE "createdById" = ANY($1) OR "vendorId" = ANY($2) OR note ILIKE $4
+           OR EXISTS (SELECT 1 FROM purchase_return_lines l WHERE l."returnId" = r.id AND l."productId" = ANY($3))`,
+        [users, contacts, products, MARK],
+      );
+      const orders = await ids(
+        c,
+        `SELECT id FROM purchase_orders o WHERE "createdById" = ANY($1) OR "vendorId" = ANY($2) OR note ILIKE $4 OR reference ILIKE $4
+           OR EXISTS (SELECT 1 FROM purchase_order_lines l WHERE l."orderId" = o.id AND l."productId" = ANY($3))`,
+        [users, contacts, products, MARK],
+      );
+      const requests = await ids(
+        c,
+        `SELECT id FROM purchase_requests r WHERE "createdById" = ANY($1) OR "requesterId" = ANY($1) OR note ILIKE $3 OR reference ILIKE $3
+           OR EXISTS (SELECT 1 FROM purchase_request_lines l WHERE l."requestId" = r.id AND l."productId" = ANY($2))`,
+        [users, products, MARK],
+      );
+      // ใบนำเข้า/นำออกที่อ้าง PO/RT เหล่านี้ (กรณีสินค้าไม่ใช่ของเทส)
+      const moreIssues = await ids(c, `SELECT id FROM goods_issues WHERE "purchaseReturnId" = ANY($1)`, [returns]);
+      const moreReceipts = await ids(c, `SELECT id FROM goods_receipts WHERE "purchaseOrderId" = ANY($1)`, [orders]);
+      if (moreIssues.length || moreReceipts.length) {
+        await c.query(`DELETE FROM stock_movements WHERE "refId" = ANY($1) OR "refId" = ANY($2)`, [moreIssues, moreReceipts]);
+        await c.query(`DELETE FROM goods_issues WHERE id = ANY($1)`, [moreIssues]);
+        await c.query(`DELETE FROM stock_serials WHERE "receiptLineId" IN (SELECT id FROM goods_receipt_lines WHERE "receiptId" = ANY($1))`, [moreReceipts]);
+        await c.query(`DELETE FROM goods_receipts WHERE id = ANY($1)`, [moreReceipts]);
+      }
+      n.returns = (await c.query(`DELETE FROM purchase_returns WHERE id = ANY($1)`, [returns])).rowCount ?? 0;
+      n.orders = (await c.query(`DELETE FROM purchase_orders WHERE id = ANY($1)`, [orders])).rowCount ?? 0;
+      n.requests = (await c.query(`DELETE FROM purchase_requests WHERE id = ANY($1)`, [requests])).rowCount ?? 0;
+      const purchaseDocs = [...returns, ...orders, ...requests];
+      await c.query(`DELETE FROM approval_actions WHERE "docId" = ANY($1) OR "actorId" = ANY($2)`, [purchaseDocs, users]);
+      await c.query(`DELETE FROM approval_step_approvers WHERE "userId" = ANY($1)`, [users]);
+      await c.query(`DELETE FROM approval_steps s WHERE NOT EXISTS (SELECT 1 FROM approval_step_approvers a WHERE a."stepId" = s.id)`);
+      n.noteTemplates = (await c.query(`DELETE FROM note_templates WHERE title ILIKE $1 OR body ILIKE $1`, [MARK])).rowCount ?? 0;
+
+      const all = [...users, ...groups, ...contacts, ...products, ...attributes, ...units, ...categories, ...locations, ...receipts, ...issues, ...purchaseDocs];
       n.auditLogs = (await c.query(`DELETE FROM audit_logs WHERE "entityId" = ANY($1) OR "actorId" = ANY($2)`, [all, users])).rowCount ?? 0;
       n.products = (await c.query(`DELETE FROM products WHERE id = ANY($1)`, [products])).rowCount ?? 0;
       await c.query(`DELETE FROM product_attribute_values WHERE "attributeId" = ANY($1)`, [attributes]);
@@ -122,5 +159,43 @@ export async function restoreCompany(since: Date) {
       [row.nameTh, row.nameEn, row.address, row.taxId, row.branch, row.phone, row.email, row.website, row.logoKey],
     );
     await c.query(`DELETE FROM audit_logs WHERE "entityType" = 'CompanySetting' AND "createdAt" >= $1`, [since]);
+  });
+}
+
+const APPROVAL_SNAPSHOT = path.join(process.cwd(), "tests", "e2e", ".auth", "approval-snapshot.json");
+
+/** เก็บผังอนุมัติไว้ก่อนเทส (เทสการอนุมัติจะแก้ผัง) */
+export async function snapshotApproval() {
+  const rows = await withClient(async (c) =>
+    (await c.query(`SELECT s."docType", s."stepNo", a."userId" FROM approval_steps s JOIN approval_step_approvers a ON a."stepId" = s.id ORDER BY 1, 2`)).rows,
+  );
+  await mkdir(path.dirname(APPROVAL_SNAPSHOT), { recursive: true });
+  await writeFile(APPROVAL_SNAPSHOT, JSON.stringify(rows));
+}
+
+/** คืนค่าผังอนุมัติ + ลบ audit log ที่เทสสร้างกับการตั้งค่าอนุมัติ */
+export async function restoreApproval(since: Date) {
+  const rows: { docType: string; stepNo: number; userId: string }[] = JSON.parse(await readFile(APPROVAL_SNAPSHOT, "utf8").catch(() => "null")) ?? null;
+  if (!rows) return;
+  await withClient(async (c) => {
+    await c.query("BEGIN");
+    try {
+      await c.query(`DELETE FROM approval_steps`);
+      const steps = new Map<string, string>();
+      for (const r of rows) {
+        const k = `${r.docType}:${r.stepNo}`;
+        if (!steps.has(k)) {
+          const id = `rs${Math.random().toString(36).slice(2, 12)}${steps.size}`;
+          await c.query(`INSERT INTO approval_steps (id, "docType", "stepNo") VALUES ($1, $2, $3)`, [id, r.docType, r.stepNo]);
+          steps.set(k, id);
+        }
+        await c.query(`INSERT INTO approval_step_approvers ("stepId", "userId") VALUES ($1, $2) ON CONFLICT DO NOTHING`, [steps.get(k), r.userId]);
+      }
+      await c.query(`DELETE FROM audit_logs WHERE "entityType" = 'ApprovalSetting' AND "createdAt" >= $1`, [since]);
+      await c.query("COMMIT");
+    } catch (e) {
+      await c.query("ROLLBACK");
+      throw e;
+    }
   });
 }

@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma, type TxClient } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
-import { ApiError } from "@/lib/api";
+import { ApiError } from "@/lib/errors";
 import { flagsToRow, rowToFlags } from "@/lib/rbac";
 import { PERMISSION_ACTIONS } from "@/lib/menu";
 import type { CurrentUser } from "@/lib/session";

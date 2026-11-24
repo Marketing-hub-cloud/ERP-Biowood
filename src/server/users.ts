@@ -2,7 +2,7 @@ import "server-only";
 import bcrypt from "bcryptjs";
 import { prisma, type TxClient } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
-import { ApiError } from "@/lib/api";
+import { ApiError } from "@/lib/errors";
 import type { CurrentUser } from "@/lib/session";
 import type { z } from "zod";
 import type { userCreateSchema, userStatusSchema, userUpdateSchema } from "@/lib/validators";

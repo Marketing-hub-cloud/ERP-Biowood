@@ -17,6 +17,11 @@ const ENTITY_MENU: Record<string, string> = {
   Product: "inventory.product",
   GoodsReceipt: "inventory.receipt",
   GoodsIssue: "inventory.issue",
+  PurchaseRequest: "purchase.request",
+  PurchaseOrder: "purchase.order",
+  PurchaseReturn: "purchase.return",
+  ApprovalSetting: "settings.approval",
+  NoteTemplate: "settings.remark",
   // Contact: ตรวจตามบทบาทด้านล่าง
 };
 
