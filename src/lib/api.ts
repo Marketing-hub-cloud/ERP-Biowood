@@ -5,16 +5,9 @@ import { Prisma } from "@/generated/prisma/client";
 import { getCurrentUser, type CurrentUser } from "./session";
 import { can } from "./rbac";
 import type { PermissionAction } from "./menu";
+import { ApiError } from "./errors";
 
-export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    public fields?: Record<string, string>,
-  ) {
-    super(message);
-  }
-}
+export { ApiError };
 
 export type ApiContext<P> = {
   req: NextRequest;

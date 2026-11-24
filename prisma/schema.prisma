@@ -35,7 +35,15 @@ model User {
   createdById  String?
 
   groups    UserGroup[]
-  auditLogs AuditLog[] @relation("AuditActor")
+  auditLogs AuditLog[]  @relation("AuditActor")
+
+  receiptsCreated   GoodsReceipt[]  @relation("ReceiptCreatedBy")
+  receiptsPosted    GoodsReceipt[]  @relation("ReceiptPostedBy")
+  receiptsCancelled GoodsReceipt[]  @relation("ReceiptCancelledBy")
+  issuesCreated     GoodsIssue[]    @relation("IssueCreatedBy")
+  issuesPosted      GoodsIssue[]    @relation("IssuePostedBy")
+  issuesCancelled   GoodsIssue[]    @relation("IssueCancelledBy")
+  movements         StockMovement[] @relation("MovementCreatedBy")
 
   @@map("users")
 }
@@ -204,6 +212,7 @@ model Contact {
   channels             ContactChannel[]
   persons              ContactPerson[]
   tags                 ContactTag[]
+  goodsIssues          GoodsIssue[]
 
   @@index([isCustomer, deletedAt])
   @@index([isVendor, deletedAt])
@@ -331,6 +340,13 @@ model StockLocation {
   parent   StockLocation?  @relation("LocationTree", fields: [parentId], references: [id])
   children StockLocation[] @relation("LocationTree")
 
+  receipts           GoodsReceipt[]     @relation("ReceiptWarehouse")
+  receiptLines       GoodsReceiptLine[] @relation("ReceiptLineLocation")
+  serialsWarehouse   StockSerial[]      @relation("SerialWarehouse")
+  serialsLocation    StockSerial[]      @relation("SerialLocation")
+  movementsWarehouse StockMovement[]    @relation("MovementWarehouse")
+  movementsLocation  StockMovement[]    @relation("MovementLocation")
+
   @@unique([parentId, code])
   @@index([parentId])
   @@map("stock_locations")
@@ -406,6 +422,10 @@ model Product {
   stockUnit       Unit?                   @relation(fields: [stockUnitId], references: [id])
   images          ProductImage[]
   attributeValues ProductAttributeValue[]
+  receiptLines    GoodsReceiptLine[]
+  issueLines      GoodsIssueLine[]
+  serials         StockSerial[]
+  movements       StockMovement[]
 
   @@index([categoryId])
   @@index([name])
@@ -436,4 +456,190 @@ model ProductAttributeValue {
   @@id([productId, attributeId])
   @@index([attributeId])
   @@map("product_attribute_values")
+}
+
+// ───────────────────────── เฟส 4: นำเข้า / นำออก / Stock ledger ─────────────────────────
+
+enum GoodsReceiptType {
+  PURCHASE // สั่งซื้อ (อ้างอิง PO — เปิดใช้ในเฟส 5)
+  OTHER // อื่นๆ
+}
+
+enum GoodsIssueType {
+  SALE // ขาย
+  RETURN // ส่งคืน (อ้างอิงใบส่งคืน — เปิดใช้ในเฟส 5)
+  SAMPLE // เบิกตัวอย่าง
+  OTHER // อื่นๆ
+}
+
+enum StockDocStatus {
+  DRAFT // ร่าง
+  POSTED // นำเข้าแล้ว / นำออกแล้ว
+  CANCELLED // ยกเลิก
+}
+
+enum MovementType {
+  RECEIPT
+  ISSUE
+  RECEIPT_REVERSAL // ยกเลิกใบนำเข้าที่นำเข้าแล้ว
+  ISSUE_REVERSAL // ยกเลิกใบนำออกที่นำออกแล้ว
+}
+
+/// ใบนำเข้า (GR)
+model GoodsReceipt {
+  id            String           @id @default(cuid())
+  docNo         String           @unique
+  type          GoodsReceiptType @default(OTHER)
+  docDate       DateTime         @db.Date
+  warehouseId   String
+  lot           String?
+  note          String?
+  status        StockDocStatus   @default(DRAFT)
+  postedAt      DateTime?
+  postedById    String?
+  cancelledAt   DateTime?
+  cancelledById String?
+  cancelReason  String?
+  createdById   String
+  updatedById   String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  warehouse   StockLocation      @relation("ReceiptWarehouse", fields: [warehouseId], references: [id])
+  createdBy   User               @relation("ReceiptCreatedBy", fields: [createdById], references: [id])
+  postedBy    User?              @relation("ReceiptPostedBy", fields: [postedById], references: [id])
+  cancelledBy User?              @relation("ReceiptCancelledBy", fields: [cancelledById], references: [id])
+  lines       GoodsReceiptLine[]
+
+  @@index([status, docDate])
+  @@index([warehouseId])
+  @@map("goods_receipts")
+}
+
+model GoodsReceiptLine {
+  id         String  @id @default(cuid())
+  receiptId  String
+  lineNo     Int
+  productId  String
+  locationId String? // ต้องเลือกก่อนกด "นำเข้า"
+  note       String?
+
+  receipt  GoodsReceipt   @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  product  Product        @relation(fields: [productId], references: [id])
+  location StockLocation? @relation("ReceiptLineLocation", fields: [locationId], references: [id])
+  serials  StockSerial[]
+
+  @@index([receiptId])
+  @@index([productId])
+  @@map("goods_receipt_lines")
+}
+
+/// Barcode / SN 1 ชิ้น (สร้างจากใบนำเข้า)
+model StockSerial {
+  id            String    @id @default(cuid())
+  barcode       String    @unique // GR2611240001-001
+  seq           Int // ลำดับภายในใบนำเข้า
+  productId     String
+  receiptLineId String
+  initialQty    Decimal   @db.Decimal(14, 3)
+  // คัดลอกตอนกด "นำเข้า" (ใช้ค้นหา/รายงาน)
+  warehouseId   String?
+  locationId    String?
+  lot           String?
+  scannedAt     DateTime?
+  scannedById   String?
+  createdAt     DateTime  @default(now())
+
+  product     Product          @relation(fields: [productId], references: [id])
+  receiptLine GoodsReceiptLine @relation(fields: [receiptLineId], references: [id], onDelete: Cascade)
+  warehouse   StockLocation?   @relation("SerialWarehouse", fields: [warehouseId], references: [id])
+  location    StockLocation?   @relation("SerialLocation", fields: [locationId], references: [id])
+  movements   StockMovement[]
+  issueLines  GoodsIssueLine[]
+
+  @@index([receiptLineId])
+  @@index([productId])
+  @@map("stock_serials")
+}
+
+/// ใบนำออก (GI)
+model GoodsIssue {
+  id              String         @id @default(cuid())
+  docNo           String         @unique
+  type            GoodsIssueType
+  docDate         DateTime       @db.Date
+  contactId       String?
+  recipientName   String?
+  shippingAddress String?
+  note            String?
+  status          StockDocStatus @default(DRAFT)
+  postedAt        DateTime?
+  postedById      String?
+  cancelledAt     DateTime?
+  cancelledById   String?
+  cancelReason    String?
+  createdById     String
+  updatedById     String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  contact     Contact?         @relation(fields: [contactId], references: [id])
+  createdBy   User             @relation("IssueCreatedBy", fields: [createdById], references: [id])
+  postedBy    User?            @relation("IssuePostedBy", fields: [postedById], references: [id])
+  cancelledBy User?            @relation("IssueCancelledBy", fields: [cancelledById], references: [id])
+  lines       GoodsIssueLine[]
+
+  @@index([status, docDate])
+  @@index([contactId])
+  @@map("goods_issues")
+}
+
+model GoodsIssueLine {
+  id        String  @id @default(cuid())
+  issueId   String
+  lineNo    Int
+  serialId  String
+  productId String
+  quantity  Decimal @db.Decimal(14, 3)
+  note      String?
+
+  issue   GoodsIssue  @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  serial  StockSerial @relation(fields: [serialId], references: [id])
+  product Product     @relation(fields: [productId], references: [id])
+
+  @@unique([issueId, serialId])
+  @@index([serialId])
+  @@map("goods_issue_lines")
+}
+
+/// Stock ledger — เพิ่มอย่างเดียว ห้ามแก้/ลบ ยอดคงคลังคำนวณจากตารางนี้เท่านั้น
+model StockMovement {
+  id          String       @id @default(cuid())
+  type        MovementType
+  productId   String
+  warehouseId String
+  locationId  String?
+  serialId    String
+  lot         String?
+  quantity    Decimal      @db.Decimal(14, 3) // + เข้า / − ออก
+  refType     String // "GR" | "GI"
+  refId       String
+  refLineId   String?
+  refDocNo    String
+  occurredAt  DateTime     @default(now())
+  createdById String
+  createdAt   DateTime     @default(now())
+
+  product   Product        @relation(fields: [productId], references: [id])
+  warehouse StockLocation  @relation("MovementWarehouse", fields: [warehouseId], references: [id])
+  location  StockLocation? @relation("MovementLocation", fields: [locationId], references: [id])
+  serial    StockSerial    @relation(fields: [serialId], references: [id])
+  createdBy User           @relation("MovementCreatedBy", fields: [createdById], references: [id])
+
+  @@index([productId])
+  @@index([serialId])
+  @@index([warehouseId, locationId])
+  @@index([refType, refId])
+  @@index([occurredAt])
+  @@map("stock_movements")
 }

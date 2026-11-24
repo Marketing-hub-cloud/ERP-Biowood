@@ -68,6 +68,14 @@ const FIELD_LABEL: Record<string, string> = {
   stockUnit: "หน่วยสต๊อก",
   attributes: "ข้อมูลเฉพาะ",
   images: "จำนวนรูป",
+  type: "ประเภท",
+  docDate: "วันที่เอกสาร",
+  warehouse: "คลัง",
+  lot: "Lot",
+  lines: "รายการ",
+  contact: "ลูกค้า/ผู้ติดต่อ",
+  recipientName: "ชื่อผู้รับ",
+  shippingAddress: "ที่อยู่จัดส่ง",
 };
 
 const VALUE_LABEL: Record<string, string> = { ACTIVE: "ใช้งาน", INACTIVE: "หยุดใช้งาน", true: "ใช่", false: "ไม่ใช่" };

@@ -104,7 +104,7 @@ export function TreeEditor({ kind, nodes, usage, canEdit }: { kind: TreeKind; no
             <span className="font-medium">{n.name}</span>
             <span className="text-xs text-muted-foreground">{cfg.levelNames[n.level]}</span>
             {!n.isActive && <Badge variant="secondary">ปิดใช้งาน</Badge>}
-            {used > 0 && <span className="text-xs text-muted-foreground">· สินค้า {used}</span>}
+            {used > 0 && <span className="text-xs text-muted-foreground">· {kind === "categories" ? `สินค้า ${used}` : "มีการใช้งานในคลัง"}</span>}
             <span className="flex-1" />
             {canEdit && (
               <span className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">

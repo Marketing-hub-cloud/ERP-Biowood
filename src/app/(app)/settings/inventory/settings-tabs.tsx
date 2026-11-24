@@ -31,7 +31,7 @@ export function InventorySettingsTabs({ data, canEdit, initialTab }: { data: Inv
         ))}
       </TabsList>
       <TabsContent value="locations">
-        <TreeEditor kind="locations" nodes={data.locations} usage={{}} canEdit={canEdit} />
+        <TreeEditor kind="locations" nodes={data.locations} usage={data.usage.locations} canEdit={canEdit} />
       </TabsContent>
       <TabsContent value="categories">
         <TreeEditor kind="categories" nodes={data.categories} usage={data.usage.categories} canEdit={canEdit} />

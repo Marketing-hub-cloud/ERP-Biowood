@@ -6,6 +6,7 @@ import { fileUrl } from "@/lib/storage";
 import { descendantIds, pathLabel, type TreeNode } from "@/lib/tree";
 import { productSchema } from "@/lib/validators";
 import { createProduct } from "@/server/products";
+import { productOnHand } from "@/server/stock";
 import type { Prisma } from "@/generated/prisma/client";
 
 const SORTABLE = ["code", "name", "createdAt", "updatedAt"];
@@ -49,7 +50,7 @@ export const GET = apiHandler({ perm: ["inventory.product", "view"] }, async ({ 
   const orderBy: Prisma.ProductOrderByWithRelationInput = p.sort ? { [p.sort.field]: p.sort.dir } : { code: "asc" };
 
   type Row = Prisma.ProductGetPayload<{ include: typeof include }>;
-  const toRow = (r: Row): ProductRow => ({
+  const toRow = (r: Row, onHand: Map<string, number>): ProductRow => ({
     id: r.id,
     code: r.code,
     name: r.name,
@@ -59,7 +60,7 @@ export const GET = apiHandler({ perm: ["inventory.product", "view"] }, async ({ 
     unit: r.stockUnit?.name ?? null,
     isStockable: r.isStockable,
     isActive: r.isActive,
-    onHand: 0, // TODO(เฟส 4): จาก stock ledger
+    onHand: onHand.get(r.id) ?? 0,
     createdAt: r.createdAt.toISOString(),
   });
 
@@ -68,6 +69,7 @@ export const GET = apiHandler({ perm: ["inventory.product", "view"] }, async ({ 
       prisma.product.findMany({ where, orderBy, include }),
       prisma.productAttribute.findMany({ where: { isActive: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
     ]);
+    const onHand = await productOnHand(rows.map((r) => r.id));
     const csv = toCsv(rows, [
       { header: "รหัสสินค้า", value: (r) => r.code },
       { header: "ชื่อ", value: (r) => r.name },
@@ -80,7 +82,7 @@ export const GET = apiHandler({ perm: ["inventory.product", "view"] }, async ({ 
         header: a.unitLabel ? `${a.name} (${a.unitLabel})` : a.name,
         value: (r: Row) => r.attributeValues.find((v) => v.attributeId === a.id)?.value,
       })),
-      { header: "คงเหลือ", value: () => 0 },
+      { header: "คงเหลือ", value: (r) => (r.isStockable ? (onHand.get(r.id) ?? 0) : "") },
       { header: "รายละเอียด", value: (r) => r.description },
       { header: "วันที่สร้าง", value: (r) => formatDateTime(r.createdAt) },
     ]);
@@ -91,7 +93,8 @@ export const GET = apiHandler({ perm: ["inventory.product", "view"] }, async ({ 
     prisma.product.count({ where }),
     prisma.product.findMany({ where, orderBy, include, skip: (p.page - 1) * p.pageSize, take: p.pageSize }),
   ]);
-  return { rows: rows.map(toRow), total, page: p.page, pageSize: p.pageSize } satisfies ListResult<ProductRow>;
+  const onHand = await productOnHand(rows.map((r) => r.id));
+  return { rows: rows.map((r) => toRow(r, onHand)), total, page: p.page, pageSize: p.pageSize } satisfies ListResult<ProductRow>;
 });
 
 export const POST = apiHandler({ perm: ["inventory.product", "create"] }, async ({ req, user, ip }) => {

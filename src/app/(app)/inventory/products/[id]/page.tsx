@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { fileUrl } from "@/lib/storage";
 import { formatDateTime } from "@/lib/format";
 import { getProductFormOptions, productInclude } from "@/server/products";
+import { productStock } from "@/server/stock";
 import { PageHeader } from "@/components/page-header";
 import { AuditHistory } from "@/components/audit-history";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +16,7 @@ export default async function ProductDetailPage({ params }: PageProps<"/inventor
   const user = await requirePagePermission("inventory.product", "view");
   const p = await prisma.product.findFirst({ where: { id, deletedAt: null }, include: productInclude });
   if (!p) notFound();
-  const options = await getProductFormOptions();
+  const [options, stock] = await Promise.all([getProductFormOptions(), productStock(p.id)]);
   const canEdit = can(user.permissions, "inventory.product", "edit");
 
   return (
@@ -41,6 +42,7 @@ export default async function ProductDetailPage({ params }: PageProps<"/inventor
         canEdit={canEdit}
         canDelete={can(user.permissions, "inventory.product", "delete")}
         canAddType={canEdit}
+        stock={stock}
         initial={{
           code: p.code,
           name: p.name,

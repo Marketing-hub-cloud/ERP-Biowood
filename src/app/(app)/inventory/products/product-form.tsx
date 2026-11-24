@@ -23,6 +23,9 @@ import { productSchema } from "@/lib/validators";
 import { validateAttributeValues } from "@/lib/product-rules";
 import { ancestry, childrenOf, type TreeNode } from "@/lib/tree";
 import type { ProductFormOptions } from "@/server/products";
+import type { StockRow } from "@/server/stock";
+import { formatNumber } from "@/lib/format";
+import { sumQty } from "@/lib/stock-rules";
 import { ProductImages } from "./product-images";
 
 const NONE = "__none__";
@@ -48,6 +51,8 @@ type Props = {
   canEdit: boolean;
   canDelete?: boolean;
   canAddType: boolean;
+  /** ยอดคงเหลือแยก คลัง/สถานที่/Lot/SN (หน้าแก้ไข) */
+  stock?: StockRow[];
 };
 
 /** ฟิลด์ไหนอยู่แท็บไหน (ใช้สลับแท็บไปยัง error แรก) */
@@ -62,7 +67,7 @@ const TAB_OF: Record<string, string> = {
 };
 const tabOf = (key: string) => (key.startsWith("attributes.") ? "specific" : (TAB_OF[key] ?? "general"));
 
-export function ProductForm({ mode, productId, initial, options, images, canEdit, canDelete, canAddType }: Props) {
+export function ProductForm({ mode, productId, initial, options, images, canEdit, canDelete, canAddType, stock = [] }: Props) {
   const router = useRouter();
   const [v, setV] = useState(initial);
   const [types, setTypes] = useState(options.productTypes);
@@ -283,7 +288,7 @@ export function ProductForm({ mode, productId, initial, options, images, canEdit
           </Card>
         </TabsContent>
 
-        {/* ───── จำนวนสินค้าคงคลัง (อ่านอย่างเดียว — ข้อมูลจริงมาในเฟส 4) ───── */}
+        {/* ───── จำนวนสินค้าคงคลัง (อ่านอย่างเดียว คำนวณจาก stock movement) ───── */}
         <TabsContent value="onhand">
           <Card>
             <CardContent className="pt-6">
@@ -298,11 +303,32 @@ export function ProductForm({ mode, productId, initial, options, images, canEdit
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                      {mode === "create" ? "บันทึกสินค้าก่อน" : "ยังไม่มีสินค้าคงคลัง (ระบบนำเข้า/นำออกจะเปิดใช้ในเฟสถัดไป)"}
-                    </TableCell>
-                  </TableRow>
+                  {stock.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                        {mode === "create" ? "บันทึกสินค้าก่อน" : "ยังไม่มีสินค้าคงคลัง"}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {stock.map((r) => (
+                    <TableRow key={r.serialId} data-testid="stock-row">
+                      <TableCell>{r.warehouse}</TableCell>
+                      <TableCell>{r.location}</TableCell>
+                      <TableCell>{r.lot ?? "-"}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.barcode}</TableCell>
+                      <TableCell className="text-right">{formatNumber(r.balance)}</TableCell>
+                    </TableRow>
+                  ))}
+                  {stock.length > 0 && (
+                    <TableRow className="font-semibold">
+                      <TableCell colSpan={4} className="text-right">
+                        รวม ({stock.length} SN)
+                      </TableCell>
+                      <TableCell className="text-right" data-testid="stock-total">
+                        {formatNumber(sumQty(stock.map((r) => r.balance)))} {units.find((u) => u.id === v.stockUnitId)?.name ?? ""}
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </CardContent>

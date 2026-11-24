@@ -1,6 +1,7 @@
 // Zod schemas — ใช้ร่วมกันทั้งฝั่ง client และ server
 import { z } from "zod";
 import { PERMISSION_MENU_KEYS } from "./menu";
+import { MAX_SERIALS_PER_BATCH, parseQty, QTY_DECIMALS } from "./stock-rules";
 
 const optionalText = z
   .string()
@@ -311,3 +312,76 @@ export const productSchema = z
   .refine((p) => !p.isStockable || p.stockUnitId, { message: "กรุณาเลือกหน่วยสต๊อก", path: ["stockUnitId"] });
 export type ProductInput = z.input<typeof productSchema>;
 export type ProductData = z.output<typeof productSchema>;
+
+// ───────────────────────── เฟส 4: นำเข้า / นำออก ─────────────────────────
+
+const qty = (label = "จำนวน") =>
+  z
+    .union([z.number(), z.string()], { error: `กรุณากรอก${label}` })
+    .transform((v, ctx) => {
+      const n = parseQty(v);
+      if (n === null) {
+        ctx.addIssue({ code: "custom", message: `${label}ต้องเป็นตัวเลข ทศนิยมไม่เกิน ${QTY_DECIMALS} ตำแหน่ง` });
+        return z.NEVER;
+      }
+      return n;
+    })
+    .refine((n) => n > 0, `${label}ต้องมากกว่า 0`)
+    .refine((n) => n < 1e11, `${label}มากเกินไป`);
+
+const docDate = z
+  .string({ error: "กรุณาเลือกวันที่เอกสาร" })
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "กรุณาเลือกวันที่เอกสาร")
+  .refine((s) => !Number.isNaN(Date.parse(`${s}T00:00:00Z`)), "วันที่ไม่ถูกต้อง");
+
+export const receiptLineSchema = z.object({
+  id: z.string().optional().nullable(),
+  productId: z.string({ error: "กรุณาเลือกสินค้า" }).min(1, "กรุณาเลือกสินค้า"),
+  locationId: text(50),
+  note: text(500),
+});
+
+export const receiptSchema = z.object({
+  type: z.enum(["PURCHASE", "OTHER"]).default("OTHER"),
+  docDate,
+  warehouseId: z.string({ error: "กรุณาเลือกคลัง" }).min(1, "กรุณาเลือกคลัง"),
+  lot: text(100),
+  note: text(2000),
+  lines: z.array(receiptLineSchema).max(200, "ไม่เกิน 200 รายการ").default([]),
+});
+export type ReceiptInput = z.input<typeof receiptSchema>;
+export type ReceiptData = z.output<typeof receiptSchema>;
+
+export const generateSerialsSchema = z.object({
+  count: z.coerce
+    .number({ error: "กรุณากรอกจำนวน SN" })
+    .int("จำนวน SN ต้องเป็นจำนวนเต็ม")
+    .min(1, "จำนวน SN ต้องตั้งแต่ 1")
+    .max(MAX_SERIALS_PER_BATCH, `สร้างได้ครั้งละไม่เกิน ${MAX_SERIALS_PER_BATCH} SN`),
+  qtyPerSerial: qty("จำนวนต่อ SN"),
+});
+
+export const scanSchema = z.object({ barcode: z.string().trim().min(1, "กรุณาสแกน barcode").max(100) });
+
+export const cancelDocSchema = z.object({ reason: required("เหตุผลการยกเลิก", 500) });
+
+export const issueLineSchema = z.object({
+  serialId: z.string().min(1),
+  quantity: qty(),
+  note: text(500),
+});
+
+export const issueSchema = z
+  .object({
+    type: z.enum(["SALE", "RETURN", "SAMPLE", "OTHER"], { error: "กรุณาเลือกประเภท" }),
+    docDate,
+    contactId: text(50),
+    recipientName: text(200),
+    shippingAddress: text(1000),
+    note: text(2000),
+    lines: z.array(issueLineSchema).max(500, "ไม่เกิน 500 รายการ").default([]),
+  })
+  .refine((d) => d.type !== "SALE" || d.contactId, { message: "ประเภทขายต้องเลือกลูกค้า", path: ["contactId"] })
+  .refine((d) => new Set(d.lines.map((l) => l.serialId)).size === d.lines.length, { message: "มี SN ซ้ำในรายการ", path: ["lines"] });
+export type IssueInput = z.input<typeof issueSchema>;
+export type IssueData = z.output<typeof issueSchema>;

@@ -3,9 +3,10 @@ import { z } from "zod";
 import { prisma, type TxClient } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
 import { ApiError } from "@/lib/api";
-import { checkPlacement, relevel, TREE_CONFIG, type TreeKind, type TreeNode } from "@/lib/tree";
+import { ancestry, checkPlacement, descendantIds, relevel, TREE_CONFIG, type TreeKind, type TreeNode } from "@/lib/tree";
 import { attributeSchema, treeNodeSchema, unitSchema } from "@/lib/validators";
 import type { CurrentUser } from "@/lib/session";
+import { locationUsage } from "./stock";
 
 export const ENTITY_BY_TREE: Record<TreeKind, string> = { locations: "StockLocation", categories: "ProductCategory" };
 export const ENTITY_UNIT = "Unit";
@@ -41,8 +42,8 @@ export async function listTree(kind: TreeKind): Promise<TreeNode[]> {
 /** จำนวนการใช้งาน (ลูก + ข้อมูลที่อ้างอิง) — ใช้ตัดสินว่าลบได้หรือไม่ */
 async function treeUsage(tx: TxClient, kind: TreeKind, id: string, nodes: TreeNode[]) {
   const children = nodes.filter((n) => n.parentId === id).length;
-  // TODO(เฟส 4): นับ stock movement ที่อ้างอิงสถานที่นี้
-  const refs = kind === "categories" ? await tx.product.count({ where: { categoryId: id } }) : 0;
+  const refs =
+    kind === "categories" ? await tx.product.count({ where: { categoryId: id } }) : ((await locationUsage(tx, [id]))[id] ?? 0);
   return { children, refs };
 }
 
@@ -93,6 +94,16 @@ export async function updateTreeNode(actor: CurrentUser, kind: TreeKind, id: str
     if (moved) {
       const err = checkPlacement(kind, nodes, d.parentId, id);
       if (err) throw new ApiError(400, err, { parentId: err });
+      // สถานที่ที่มีสต๊อก/เอกสารแล้ว ห้ามย้ายข้ามคลัง (ยอดคงคลังของคลังจะเพี้ยน)
+      if (kind === "locations") {
+        const rootOf = (pid: string | null) => (pid ? ancestry(nodes, pid)[0]?.id : null);
+        const oldRoot = rootOf(node.parentId) ?? node.id;
+        const newRoot = rootOf(d.parentId) ?? node.id;
+        if (oldRoot !== newRoot || !d.parentId || !node.parentId) {
+          const usage = await locationUsage(tx, descendantIds(nodes, id));
+          if (Object.keys(usage).length) throw new ApiError(400, "ย้ายข้ามคลังไม่ได้ เพราะสถานที่นี้ (หรือรายการย่อย) มีเอกสารนำเข้า/ความเคลื่อนไหวในคลังแล้ว", { parentId: "ย้ายข้ามคลังไม่ได้" });
+        }
+      }
     }
     assertUniqueSibling(kind, nodes, d.parentId, d, id);
     const newLevel = d.parentId ? nodes.find((n) => n.id === d.parentId)!.level + 1 : cfg.rootLevel;
@@ -121,7 +132,10 @@ export async function deleteTreeNode(actor: CurrentUser, kind: TreeKind, id: str
     if (!node) throw new ApiError(404, "ไม่พบข้อมูล");
     const u = await treeUsage(tx, kind, id, nodes);
     if (u.children) throw new ApiError(400, "ลบไม่ได้ เพราะมีรายการย่อยอยู่ กรุณาลบหรือย้ายรายการย่อยก่อน");
-    if (u.refs) throw new ApiError(400, `ลบไม่ได้ เพราะมีสินค้าใช้อยู่ ${u.refs} รายการ (ใช้ "ปิดใช้งาน" แทน)`);
+    if (u.refs) {
+      const what = kind === "categories" ? `มีสินค้าใช้อยู่ ${u.refs} รายการ` : "มีเอกสารนำเข้า/ความเคลื่อนไหวในคลังอ้างอิงอยู่";
+      throw new ApiError(400, `ลบไม่ได้ เพราะ${what} (ใช้ "ปิดใช้งาน" แทน)`);
+    }
     await repo.remove(id);
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_BY_TREE[kind], entityId: id, action: "DELETE", before: snapshotNode(node, nodes), ip });
   });
@@ -199,7 +213,7 @@ export async function deleteAttribute(actor: CurrentUser, id: string, ip: string
 
 /** ข้อมูลทั้งหมดของหน้าตั้งค่าคลัง + จำนวนการใช้งาน */
 export async function getInventorySettings() {
-  const [locations, categories, units, attributes, catUse, unitUse, attrUse] = await Promise.all([
+  const [locations, categories, units, attributes, catUse, unitUse, attrUse, locUse] = await Promise.all([
     prisma.stockLocation.findMany(),
     prisma.productCategory.findMany(),
     prisma.unit.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
@@ -207,6 +221,7 @@ export async function getInventorySettings() {
     prisma.product.groupBy({ by: ["categoryId"], _count: true }),
     prisma.product.groupBy({ by: ["stockUnitId"], _count: true }),
     prisma.productAttributeValue.groupBy({ by: ["attributeId"], _count: true }),
+    locationUsage(prisma),
   ]);
   const map = <K extends string>(rows: ({ _count: number } & Record<K, string | null>)[], k: K) =>
     Object.fromEntries(rows.filter((r) => r[k]).map((r) => [r[k] as string, r._count]));
@@ -226,6 +241,7 @@ export async function getInventorySettings() {
     })),
     usage: {
       categories: map(catUse, "categoryId"),
+      locations: locUse,
       units: map(unitUse, "stockUnitId"),
       attributes: map(attrUse, "attributeId"),
     },

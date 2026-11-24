@@ -29,6 +29,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { formatNumber } from "@/lib/format";
+import { DateField } from "@/components/date-field";
 import { cn } from "@/lib/utils";
 
 export type DataColumn<T> = {
@@ -41,7 +42,10 @@ export type DataColumn<T> = {
   className?: string;
 };
 
-export type DataFilter = { id: string; label: string; options: { value: string; label: string }[] };
+export type DataFilter =
+  | { id: string; label: string; options: { value: string; label: string }[] }
+  /** ช่วงวันที่: ส่งเป็น f_from / f_to (YYYY-MM-DD) */
+  | { id: string; label: string; type: "dateRange" };
 
 type Density = "compact" | "normal" | "comfortable";
 const DENSITY_LABEL: Record<Density, string> = { compact: "กะทัดรัด", normal: "ปกติ", comfortable: "กว้าง" };
@@ -205,8 +209,26 @@ export function DataTable<T extends { id: string }>({
                 {activeFilters > 0 && <Badge className="ml-1 h-4 px-1.5 text-[10px]">{activeFilters}</Badge>}
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-64 space-y-3">
-              {filters.map((f) => (
+            <PopoverContent align="start" className="w-72 space-y-3">
+              {filters.map((f) =>
+                "type" in f ? (
+                  <div key={f.id} className="space-y-1">
+                    <Label className="text-xs">{f.label}</Label>
+                    <div className="grid gap-1.5">
+                      {(["from", "to"] as const).map((k) => (
+                        <DateField
+                          key={k}
+                          aria-label={k === "from" ? `${f.label} ตั้งแต่` : `${f.label} ถึง`}
+                          value={filterValues[k] ?? ""}
+                          onChange={(v) => {
+                            setFilterValues((fv) => ({ ...fv, [k]: v }));
+                            setPage(1);
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : (
                 <div key={f.id} className="space-y-1">
                   <Label className="text-xs">{f.label}</Label>
                   <Select
@@ -229,7 +251,8 @@ export function DataTable<T extends { id: string }>({
                     </SelectContent>
                   </Select>
                 </div>
-              ))}
+                ),
+              )}
               {activeFilters > 0 && (
                 <Button variant="ghost" size="sm" className="w-full" onClick={() => setFilterValues({})}>
                   <X /> ล้างตัวกรอง

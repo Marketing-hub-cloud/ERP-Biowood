@@ -7,6 +7,7 @@ import { normalizeAttributeValue, validateAttributeValues, type AttributeDef } f
 import type { ProductData } from "@/lib/validators";
 import type { CurrentUser } from "@/lib/session";
 import type { Prisma } from "@/generated/prisma/client";
+import { productStockUsage } from "./stock";
 
 export const ENTITY_PRODUCT = "Product";
 export const MAX_PRODUCT_IMAGES = 10;
@@ -27,7 +28,8 @@ export async function getProductOr404(id: string) {
 }
 
 async function snapshot(tx: TxClient, id: string) {
-  const [p, cats] = await Promise.all([tx.product.findUniqueOrThrow({ where: { id }, include: productInclude }), tx.productCategory.findMany()]);
+  const p = await tx.product.findUniqueOrThrow({ where: { id }, include: productInclude });
+  const cats = await tx.productCategory.findMany();
   return {
     code: p.code,
     name: p.name,
@@ -106,8 +108,16 @@ export async function createProduct(actor: CurrentUser, d: ProductData, ip: stri
 
 export async function updateProduct(actor: CurrentUser, id: string, d: ProductData, ip: string | null) {
   const current = await getProductOr404(id);
-  // TODO(เฟส 4): ถ้ามีสต๊อกคงเหลือ ห้ามเปลี่ยนหน่วยสต๊อก / ปิด "สต๊อกได้"
   return prisma.$transaction(async (tx) => {
+    // มีความเคลื่อนไหวในคลังหรือเอกสารคลังแล้ว: ห้ามเปลี่ยนหน่วยสต๊อก / ปิด "สต๊อกได้"
+    if (d.stockUnitId !== current.stockUnitId || (current.isStockable && !d.isStockable)) {
+      const u = await productStockUsage(tx, id);
+      if (u.movements || u.documents) {
+        const msg = "สินค้านี้มีความเคลื่อนไหวในคลังหรืออยู่ในเอกสารคลังแล้ว";
+        if (d.stockUnitId !== current.stockUnitId) throw new ApiError(400, `เปลี่ยนหน่วยสต๊อกไม่ได้ เพราะ${msg}`, { stockUnitId: "เปลี่ยนไม่ได้ เพราะมีความเคลื่อนไหวแล้ว" });
+        throw new ApiError(400, `ปิด "สต๊อกได้" ไม่ได้ เพราะ${msg}`, { isStockable: "ปิดไม่ได้ เพราะมีความเคลื่อนไหวแล้ว" });
+      }
+    }
     if (d.code !== current.code) await assertCodeFree(tx, d.code, id);
     await assertRefs(tx, d, current);
     const before = await snapshot(tx, id);
@@ -119,8 +129,9 @@ export async function updateProduct(actor: CurrentUser, id: string, d: ProductDa
 
 export async function deleteProduct(actor: CurrentUser, id: string, ip: string | null) {
   await getProductOr404(id);
-  // TODO(เฟส 4/5): ห้ามลบถ้ามีสต๊อกหรือเอกสารอ้างอิง
   await prisma.$transaction(async (tx) => {
+    const u = await productStockUsage(tx, id);
+    if (u.movements || u.documents) throw new ApiError(400, "ลบไม่ได้ เพราะสินค้านี้มีความเคลื่อนไหวในคลังหรืออยู่ในเอกสารคลังแล้ว (ใช้ \"ปิดใช้งาน\" แทน)");
     const before = await snapshot(tx, id);
     await tx.product.update({ where: { id }, data: { deletedAt: new Date() } });
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_PRODUCT, entityId: id, action: "DELETE", before, ip });

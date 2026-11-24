@@ -53,7 +53,28 @@ export async function cleanupTestData(): Promise<Record<string, number>> {
       files.push(...(await c.query(`SELECT key FROM product_images WHERE "productId" = ANY($1)`, [products])).rows.map((r) => r.key));
       files.push(...(await c.query(`SELECT "photoKey" AS key FROM contacts WHERE id = ANY($1) AND "photoKey" IS NOT NULL`, [contacts])).rows.map((r) => r.key));
 
-      const all = [...users, ...groups, ...contacts, ...products, ...attributes, ...units, ...categories, ...locations];
+      // เอกสารคลัง (เฟส 4) ที่อ้างอิงสินค้า/คลัง/ผู้ใช้ทดสอบ
+      const receipts = await ids(
+        c,
+        `SELECT id FROM goods_receipts r WHERE "createdById" = ANY($1) OR "warehouseId" = ANY($2) OR lot ILIKE $4 OR note ILIKE $4
+           OR EXISTS (SELECT 1 FROM goods_receipt_lines l WHERE l."receiptId" = r.id AND l."productId" = ANY($3))`,
+        [users, locations, products, MARK],
+      );
+      const issues = await ids(
+        c,
+        `SELECT id FROM goods_issues i WHERE "createdById" = ANY($1) OR "contactId" = ANY($4) OR note ILIKE $5 OR "recipientName" ILIKE $5
+           OR EXISTS (SELECT 1 FROM goods_issue_lines l JOIN stock_serials s ON s.id = l."serialId"
+                      JOIN goods_receipt_lines rl ON rl.id = s."receiptLineId"
+                      WHERE l."issueId" = i.id AND (l."productId" = ANY($3) OR rl."receiptId" = ANY($2)))`,
+        [users, receipts, products, contacts, MARK],
+      );
+      n.movements =
+        (await c.query(`DELETE FROM stock_movements WHERE "refId" = ANY($1) OR "refId" = ANY($2) OR "productId" = ANY($3)`, [receipts, issues, products])).rowCount ?? 0;
+      n.issues = (await c.query(`DELETE FROM goods_issues WHERE id = ANY($1)`, [issues])).rowCount ?? 0;
+      await c.query(`DELETE FROM stock_serials WHERE "receiptLineId" IN (SELECT id FROM goods_receipt_lines WHERE "receiptId" = ANY($1))`, [receipts]);
+      n.receipts = (await c.query(`DELETE FROM goods_receipts WHERE id = ANY($1)`, [receipts])).rowCount ?? 0;
+
+      const all = [...users, ...groups, ...contacts, ...products, ...attributes, ...units, ...categories, ...locations, ...receipts, ...issues];
       n.auditLogs = (await c.query(`DELETE FROM audit_logs WHERE "entityId" = ANY($1) OR "actorId" = ANY($2)`, [all, users])).rowCount ?? 0;
       n.products = (await c.query(`DELETE FROM products WHERE id = ANY($1)`, [products])).rowCount ?? 0;
       await c.query(`DELETE FROM product_attribute_values WHERE "attributeId" = ANY($1)`, [attributes]);

@@ -61,8 +61,8 @@ export const MENU: MenuSection[] = [
     icon: "inventory",
     items: [
       { key: "inventory.product", label: "สินค้า", href: "/inventory/products", actions: ALL, ready: true },
-      { key: "inventory.receipt", label: "นำเข้า", href: "/inventory/receipts", actions: ALL },
-      { key: "inventory.issue", label: "นำออก", href: "/inventory/issues", actions: ALL },
+      { key: "inventory.receipt", label: "นำเข้า", href: "/inventory/receipts", actions: ALL, ready: true },
+      { key: "inventory.issue", label: "นำออก", href: "/inventory/issues", actions: ALL, ready: true },
       { key: "inventory.delivery", label: "ตารางงานพนักงานส่ง", href: "/inventory/deliveries", actions: ALL },
       { key: "inventory.report", label: "รายงาน", href: "/inventory/reports", actions: VIEW_ONLY },
     ],

@@ -15,6 +15,8 @@ const ENTITY_MENU: Record<string, string> = {
   Unit: "settings.inventory",
   ProductAttribute: "settings.inventory",
   Product: "inventory.product",
+  GoodsReceipt: "inventory.receipt",
+  GoodsIssue: "inventory.issue",
   // Contact: ตรวจตามบทบาทด้านล่าง
 };
 

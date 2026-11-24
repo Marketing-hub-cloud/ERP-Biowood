@@ -4,6 +4,10 @@ import bcrypt from "bcryptjs";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { flagsToRow } from "../src/lib/rbac";
+import { allocateDocNumber } from "../src/lib/doc-number";
+import { planSerials } from "../src/lib/stock-rules";
+import { postIssue, postReceipt, serialBalances } from "../src/lib/stock-ledger";
+import type { TxClient } from "../src/lib/db";
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
 
@@ -32,6 +36,16 @@ const SAMPLE_GROUPS: { name: string; description: string; permissions: Record<st
       "crm.plan": ALL,
       "crm.report": VIEW,
       "engineer.document": { view: true, create: true },
+    },
+  },
+  {
+    name: "คลังสินค้า",
+    description: "ฝ่ายคลัง: สินค้า นำเข้า นำออก",
+    permissions: {
+      "inventory.product": { view: true, create: true, edit: true },
+      "inventory.receipt": ALL,
+      "inventory.issue": ALL,
+      "inventory.report": VIEW,
     },
   },
 ];
@@ -230,6 +244,64 @@ async function main() {
       },
     });
     console.log("✔ สินค้าตัวอย่าง 2 รายการ");
+  }
+
+  // ใบนำเข้า/นำออกตัวอย่าง (เฉพาะเมื่อยังไม่มีเอกสารคลังเลย และมีข้อมูลตัวอย่างครบ)
+  if ((await prisma.goodsReceipt.count()) === 0) {
+    const [admin, deck, clip, bin] = await Promise.all([
+      prisma.user.findUnique({ where: { email } }),
+      prisma.product.findFirst({ where: { code: "BW-DK-145-BR", deletedAt: null, isStockable: true } }),
+      prisma.product.findFirst({ where: { code: "BW-CLIP-01", deletedAt: null, isStockable: true } }),
+      prisma.stockLocation.findFirst({ where: { code: "A-1-01" }, include: { parent: { include: { parent: true } } } }),
+    ]);
+    const whId = bin?.parent?.parent?.parentId;
+    if (admin && deck && clip && bin && whId) {
+      await prisma.$transaction(async (t) => {
+        const tx = t as unknown as TxClient;
+        const docNo = await allocateDocNumber(tx, "GR");
+        const today = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
+        const r = await tx.goodsReceipt.create({
+          data: { docNo, type: "OTHER", docDate: today, warehouseId: whId, lot: "LOT-SAMPLE", note: "ตัวอย่างจาก seed", createdById: admin.id },
+        });
+        let seq = 0;
+        for (const [i, [product, count, qty]] of ([[deck, 5, 10], [clip, 2, 100]] as const).entries()) {
+          const line = await tx.goodsReceiptLine.create({ data: { receiptId: r.id, lineNo: i + 1, productId: product.id, locationId: bin.id } });
+          const plan = planSerials(docNo, seq, count);
+          if (typeof plan === "string") throw new Error(plan);
+          seq += count;
+          await tx.stockSerial.createMany({
+            data: plan.map((s) => ({ barcode: s.barcode, seq: s.seq, productId: product.id, receiptLineId: line.id, initialQty: qty, scannedAt: new Date(), scannedById: admin.id })),
+          });
+        }
+        await postReceipt(tx, r.id, admin.id);
+      });
+      console.log("✔ ใบนำเข้าตัวอย่าง (5 SN × 10 แผ่น + 2 SN × 100 กล่อง)");
+    }
+  }
+
+  // ใบนำออกตัวอย่าง: เบิกตัวอย่าง 3 แผ่นจาก SN แรกของใบนำเข้าตัวอย่าง (เฉพาะเมื่อยังไม่มีใบนำออกเลย)
+  if ((await prisma.goodsIssue.count()) === 0) {
+    const [admin, first] = await Promise.all([
+      prisma.user.findUnique({ where: { email } }),
+      prisma.stockSerial.findFirst({
+        where: { product: { code: "BW-DK-145-BR" }, receiptLine: { receipt: { note: "ตัวอย่างจาก seed", status: "POSTED" } } },
+        orderBy: { seq: "asc" },
+      }),
+    ]);
+    if (admin && first) {
+      const done = await prisma.$transaction(async (t) => {
+        const tx = t as unknown as TxClient;
+        if (((await serialBalances(tx, [first.id])).get(first.id) ?? 0) < 3) return false;
+        const today = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
+        const gi = await tx.goodsIssue.create({
+          data: { docNo: await allocateDocNumber(tx, "GI"), type: "SAMPLE", docDate: today, recipientName: "ลูกค้าตัวอย่าง", note: "ตัวอย่างจาก seed", createdById: admin.id },
+        });
+        await tx.goodsIssueLine.create({ data: { issueId: gi.id, lineNo: 1, serialId: first.id, productId: first.productId, quantity: 3 } });
+        await postIssue(tx, gi.id, admin.id);
+        return true;
+      });
+      if (done) console.log("✔ ใบนำออกตัวอย่าง (เบิกตัวอย่าง 3 แผ่น)");
+    }
   }
 }
 
