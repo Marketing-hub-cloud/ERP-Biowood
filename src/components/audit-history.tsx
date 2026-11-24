@@ -54,6 +54,20 @@ const FIELD_LABEL: Record<string, string> = {
   channels: "ช่องทางติดต่อ",
   persons: "บุคคลติดต่อ",
   tags: "กลุ่ม",
+  parent: "อยู่ภายใต้",
+  level: "ระดับ",
+  sortOrder: "ลำดับ",
+  isActive: "เปิดใช้งาน",
+  dataType: "ชนิดข้อมูล",
+  options: "ตัวเลือก",
+  unitLabel: "หน่วยกำกับ",
+  isRequired: "บังคับกรอก",
+  productType: "ประเภทสินค้า",
+  category: "หมวดหมู่",
+  isStockable: "สต๊อกได้",
+  stockUnit: "หน่วยสต๊อก",
+  attributes: "ข้อมูลเฉพาะ",
+  images: "จำนวนรูป",
 };
 
 const VALUE_LABEL: Record<string, string> = { ACTIVE: "ใช้งาน", INACTIVE: "หยุดใช้งาน", true: "ใช่", false: "ไม่ใช่" };

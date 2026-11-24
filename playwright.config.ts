@@ -10,6 +10,9 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 10_000 },
   reporter: [["list"], ["html", { open: "never" }]],
+  // ล้างข้อมูลทดสอบก่อนเริ่ม/หลังจบ (ดู tests/e2e/cleanup.ts) — ตั้ง E2E_KEEP_DATA=1 เพื่อเก็บไว้ดู
+  globalSetup: "./tests/e2e/global-setup.ts",
+  globalTeardown: "./tests/e2e/global-teardown.ts",
   use: { baseURL, trace: "retain-on-failure", locale: "th-TH", timezoneId: "Asia/Bangkok" },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] } },

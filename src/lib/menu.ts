@@ -60,7 +60,7 @@ export const MENU: MenuSection[] = [
     label: "คลังสินค้า",
     icon: "inventory",
     items: [
-      { key: "inventory.product", label: "สินค้า", href: "/inventory/products", actions: ALL },
+      { key: "inventory.product", label: "สินค้า", href: "/inventory/products", actions: ALL, ready: true },
       { key: "inventory.receipt", label: "นำเข้า", href: "/inventory/receipts", actions: ALL },
       { key: "inventory.issue", label: "นำออก", href: "/inventory/issues", actions: ALL },
       { key: "inventory.delivery", label: "ตารางงานพนักงานส่ง", href: "/inventory/deliveries", actions: ALL },
@@ -101,7 +101,7 @@ export const MENU: MenuSection[] = [
     label: "ตั้งค่า",
     icon: "settings",
     items: [
-      { key: "settings.inventory", label: "ตั้งค่าคลัง", href: "/settings/inventory", actions: VIEW_EDIT },
+      { key: "settings.inventory", label: "ตั้งค่าคลัง", href: "/settings/inventory", actions: VIEW_EDIT, ready: true },
       { key: "settings.approval", label: "การอนุมัติ", href: "/settings/approval", actions: VIEW_EDIT },
       { key: "settings.remark", label: "ตั้งค่าหมายเหตุ", href: "/settings/remarks", actions: ALL },
       { key: "settings.company", label: "ข้อมูลบริษัท", href: "/settings/company", actions: VIEW_EDIT, ready: true },

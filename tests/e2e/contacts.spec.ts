@@ -155,8 +155,8 @@ test("ผู้ที่ไม่มีสิทธิ์ผู้ติดต�
   const p2 = await ctx.newPage();
   await loginOk(p2, u.email, u.password);
   expect((await p2.request.get("/api/contacts")).status()).toBe(403);
-  expect((await p2.request.post("/api/contacts", { data: contactPayload("x", { isCustomer: true, isVendor: false }) })).status()).toBe(403);
-  expect((await p2.request.post("/api/tags", { data: { name: "x" } })).status()).toBe(403);
+  expect((await p2.request.post("/api/contacts", { data: contactPayload(`x ${uid()}`, { isCustomer: true, isVendor: false }) })).status()).toBe(403);
+  expect((await p2.request.post("/api/tags", { data: { name: `x ${uid()}` } })).status()).toBe(403);
   await p2.goto("/contacts");
   await expect(p2).toHaveURL(/\/forbidden/);
   await ctx.close();
@@ -164,12 +164,19 @@ test("ผู้ที่ไม่มีสิทธิ์ผู้ติดต�
 
 test("Export CSV ผู้ขาย มี BOM และเฉพาะผู้ขาย", async ({ page }) => {
   await loginOk(page, ADMIN.email, ADMIN.password);
-  const res = await page.request.get("/api/contacts?format=csv&f_role=vendor");
+  const tag = uid();
+  for (const [name, roles] of [
+    [`ผู้ขายซีเอสวี ${tag}`, { isCustomer: false, isVendor: true }],
+    [`ลูกค้าซีเอสวี ${tag}`, { isCustomer: true, isVendor: false }],
+  ] as const) {
+    expect((await page.request.post("/api/contacts", { data: contactPayload(name, roles) })).status()).toBe(200);
+  }
+  const res = await page.request.get(`/api/contacts?format=csv&f_role=vendor&q=${tag}`);
   expect(res.status()).toBe(200);
   const body = await res.body();
   expect([...body.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
   const text = body.toString("utf8");
   expect(text).toContain("เลขประจำตัวผู้เสียภาษี");
-  expect(text).toContain("บริษัท ตัวอย่างวัสดุ จำกัด");
-  expect(text).not.toContain("คุณสมศรี ตัวอย่าง");
+  expect(text).toContain(`ผู้ขายซีเอสวี ${tag}`);
+  expect(text).not.toContain(`ลูกค้าซีเอสวี ${tag}`);
 });

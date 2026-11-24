@@ -234,8 +234,80 @@ export type ContactInput = z.input<typeof contactSchema>;
 export type ContactData = z.output<typeof contactSchema>;
 
 export const lookupSchema = z.object({
-  kind: z.enum(["CONTACT_SOURCE", "CUSTOMER_BUSINESS_TYPE"]),
+  kind: z.enum(["CONTACT_SOURCE", "CUSTOMER_BUSINESS_TYPE", "PRODUCT_TYPE"]),
   label: required("ชื่อตัวเลือก", 100),
 });
 
 export const tagSchema = z.object({ name: required("ชื่อกลุ่ม", 50) });
+
+// ───────────────────────── ตั้งค่าคลัง + สินค้า (เฟส 3) ─────────────────────────
+
+export const treeNodeSchema = z.object({
+  parentId: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((v) => (v ? v : null)),
+  code: z
+    .string()
+    .trim()
+    .max(30, "รหัสยาวได้ไม่เกิน 30 ตัวอักษร")
+    .optional()
+    .nullable()
+    .transform((v) => (v ? v.toUpperCase() : null))
+    .refine((v) => v === null || /^[A-Z0-9_.\-/]+$/.test(v), "รหัสใช้ได้เฉพาะ A-Z, 0-9 และ - _ . /"),
+  name: required("ชื่อ", 100),
+  isActive: z.boolean().optional().default(true),
+  sortOrder: z.coerce.number().int().min(0).max(9999).optional().default(0),
+});
+export type TreeNodeInput = z.input<typeof treeNodeSchema>;
+
+export const unitSchema = z.object({
+  name: required("ชื่อหน่วย", 30),
+  isActive: z.boolean().optional().default(true),
+  sortOrder: z.coerce.number().int().min(0).max(9999).optional().default(0),
+});
+
+export const ATTRIBUTE_TYPE_LABELS = { TEXT: "ข้อความ", NUMBER: "ตัวเลข", SELECT: "ตัวเลือก" } as const;
+
+export const attributeSchema = z
+  .object({
+    name: required("ชื่อคุณสมบัติ", 100),
+    dataType: z.enum(["TEXT", "NUMBER", "SELECT"]),
+    options: z
+      .array(z.string().trim().min(1).max(100))
+      .max(100)
+      .optional()
+      .default([])
+      .transform((o) => [...new Set(o)]),
+    unitLabel: text(20),
+    isRequired: z.boolean().optional().default(false),
+    isActive: z.boolean().optional().default(true),
+    sortOrder: z.coerce.number().int().min(0).max(9999).optional().default(0),
+  })
+  .refine((a) => a.dataType !== "SELECT" || a.options.length > 0, { message: "กรุณาเพิ่มตัวเลือกอย่างน้อย 1 รายการ", path: ["options"] })
+  .transform((a) => ({ ...a, options: a.dataType === "SELECT" ? a.options : [], unitLabel: a.dataType === "NUMBER" ? a.unitLabel : null }));
+export type AttributeInput = z.input<typeof attributeSchema>;
+
+export const productSchema = z
+  .object({
+    code: z
+      .string({ error: "กรุณากรอกรหัสสินค้า" })
+      .trim()
+      .min(1, "กรุณากรอกรหัสสินค้า")
+      .max(50, "รหัสยาวได้ไม่เกิน 50 ตัวอักษร")
+      .transform((v) => v.toUpperCase())
+      .refine((v) => /^[A-Z0-9_.\-/]+$/.test(v), "รหัสใช้ได้เฉพาะ A-Z, 0-9 และ - _ . /"),
+    name: required("ชื่อสินค้า", 255),
+    productTypeId: text(50),
+    categoryId: text(50),
+    description: text(5000),
+    isStockable: z.boolean(),
+    stockUnitId: text(50),
+    isActive: z.boolean().optional().default(true),
+    /** attributeId -> ค่า (ข้อความ) */
+    attributes: z.record(z.string(), z.string().trim().max(500)).optional().default({}),
+  })
+  .refine((p) => !p.isStockable || p.stockUnitId, { message: "กรุณาเลือกหน่วยสต๊อก", path: ["stockUnitId"] });
+export type ProductInput = z.input<typeof productSchema>;
+export type ProductData = z.output<typeof productSchema>;

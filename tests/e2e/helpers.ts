@@ -23,8 +23,12 @@ export async function logout(page: Page) {
   await expect(page).toHaveURL(/\/login/);
 }
 
+/**
+ * id สุ่มที่มี marker "e2e" เสมอ — global-teardown ลบข้อมูลทุกอย่างที่มี marker นี้ในชื่อ/รหัส
+ * ดังนั้นข้อมูลที่เทสสร้างต้องใช้ uid() ในชื่อหรือรหัสเสมอ
+ */
 export function uid() {
-  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  return `e2e${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
 const NO_PERMS = { view: false, create: false, edit: false, delete: false, cancel: false };

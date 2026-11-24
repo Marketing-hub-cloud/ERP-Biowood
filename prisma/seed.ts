@@ -150,6 +150,87 @@ async function main() {
     });
     console.log(`✔ ผู้ติดต่อตัวอย่าง ${samples.length} ราย`);
   }
+
+  // ── เฟส 3: ตั้งค่าคลัง + สินค้า (สร้างเฉพาะครั้งแรก) ──
+  const PRODUCT_TYPES = ["วัสดุไม้", "อุปกรณ์ติดตั้ง", "อื่นๆ"];
+  for (const [i, label] of PRODUCT_TYPES.entries()) {
+    await prisma.lookupOption.upsert({ where: { kind_label: { kind: "PRODUCT_TYPE", label } }, update: {}, create: { kind: "PRODUCT_TYPE", label, sortOrder: i } });
+  }
+  const UNITS = ["แผ่น", "เส้น", "ชิ้น", "กล่อง", "ม้วน", "ชุด", "เมตร", "ตร.ม."];
+  for (const [i, name] of UNITS.entries()) await prisma.unit.upsert({ where: { name }, update: {}, create: { name, sortOrder: i } });
+  console.log("✔ ประเภทสินค้า / หน่วย");
+
+  if ((await prisma.stockLocation.count()) === 0) {
+    const wh = await prisma.stockLocation.create({ data: { level: 0, code: "WH1", name: "คลังหลัก" } });
+    const zone = await prisma.stockLocation.create({ data: { parentId: wh.id, level: 1, code: "A", name: "โซน A" } });
+    const shelf = await prisma.stockLocation.create({ data: { parentId: zone.id, level: 2, code: "A-1", name: "ชั้น 1" } });
+    await prisma.stockLocation.create({ data: { parentId: shelf.id, level: 3, code: "A-1-01", name: "ช่อง 01" } });
+    console.log("✔ คลังหลัก (WH1) > โซน A > ชั้น 1 > ช่อง 01");
+  }
+
+  if ((await prisma.productCategory.count()) === 0) {
+    const tree: [string, [string, string[]][]][] = [
+      ["พื้น", [["พื้นไม้คอมโพสิต", ["ลายไม้", "ผิวเรียบ"]]]],
+      ["ผนัง", [["ผนังตกแต่ง", []]]],
+      ["ระแนง", [["ระแนงภายนอก", []]]],
+      ["อุปกรณ์", [["อุปกรณ์ยึด", ["คลิป", "สกรู"]]]],
+    ];
+    for (const [i, [l1, l2s]] of tree.entries()) {
+      const c1 = await prisma.productCategory.create({ data: { level: 1, name: l1, sortOrder: i } });
+      for (const [l2, l3s] of l2s) {
+        const c2 = await prisma.productCategory.create({ data: { parentId: c1.id, level: 2, name: l2 } });
+        for (const l3 of l3s) await prisma.productCategory.create({ data: { parentId: c2.id, level: 3, name: l3 } });
+      }
+    }
+    console.log("✔ หมวดหมู่สินค้าตัวอย่าง");
+  }
+
+  if ((await prisma.productAttribute.count()) === 0) {
+    await prisma.productAttribute.createMany({
+      data: [
+        { name: "ขนาด", dataType: "TEXT", sortOrder: 0 },
+        { name: "ความยาว", dataType: "NUMBER", unitLabel: "มม.", sortOrder: 1 },
+        { name: "สี", dataType: "SELECT", options: ["น้ำตาลเข้ม", "น้ำตาลอ่อน", "เทา", "ไม้สัก"], sortOrder: 2 },
+      ],
+    });
+    console.log("✔ คุณสมบัติตัวอย่าง: ขนาด / ความยาว / สี");
+  }
+
+  if ((await prisma.product.count()) === 0) {
+    const find = {
+      type: async (label: string) => (await prisma.lookupOption.findUniqueOrThrow({ where: { kind_label: { kind: "PRODUCT_TYPE", label } } })).id,
+      unit: async (name: string) => (await prisma.unit.findUniqueOrThrow({ where: { name } })).id,
+      cat: async (name: string) => (await prisma.productCategory.findFirstOrThrow({ where: { name } })).id,
+      attr: async (name: string) => (await prisma.productAttribute.findUniqueOrThrow({ where: { name } })).id,
+    };
+    await prisma.product.create({
+      data: {
+        code: "BW-DK-145-BR",
+        name: "ไม้พื้นคอมโพสิต ลายไม้ 145 มม. สีน้ำตาลเข้ม",
+        productTypeId: await find.type("วัสดุไม้"),
+        categoryId: await find.cat("ลายไม้"),
+        description: "ตัวอย่างสินค้า (แก้ไข/ลบได้)",
+        stockUnitId: await find.unit("แผ่น"),
+        attributeValues: {
+          create: [
+            { attributeId: await find.attr("ขนาด"), value: "145 x 21 มม." },
+            { attributeId: await find.attr("ความยาว"), value: "2900" },
+            { attributeId: await find.attr("สี"), value: "น้ำตาลเข้ม" },
+          ],
+        },
+      },
+    });
+    await prisma.product.create({
+      data: {
+        code: "BW-CLIP-01",
+        name: "คลิปยึดพื้น สแตนเลส",
+        productTypeId: await find.type("อุปกรณ์ติดตั้ง"),
+        categoryId: await find.cat("คลิป"),
+        stockUnitId: await find.unit("กล่อง"),
+      },
+    });
+    console.log("✔ สินค้าตัวอย่าง 2 รายการ");
+  }
 }
 
 main()

@@ -10,6 +10,11 @@ const ENTITY_MENU: Record<string, string> = {
   User: "users.account",
   PermissionGroup: "users.group",
   CompanySetting: "settings.company",
+  StockLocation: "settings.inventory",
+  ProductCategory: "settings.inventory",
+  Unit: "settings.inventory",
+  ProductAttribute: "settings.inventory",
+  Product: "inventory.product",
   // Contact: ตรวจตามบทบาทด้านล่าง
 };
 
