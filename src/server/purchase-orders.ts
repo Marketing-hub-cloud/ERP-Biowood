@@ -3,7 +3,7 @@ import { prisma, type TxClient } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
 import { ApiError } from "@/lib/errors";
 import { allocateDocNumber, DOC_PREFIXES } from "@/lib/doc-number";
-import { formatDate, formatNumber } from "@/lib/format";
+import { formatDate, formatNumber, fullName } from "@/lib/format";
 import { isApprovedLike, STATUS_LABELS } from "@/lib/approval";
 import { calcPurchaseOrder, formatMoney, VAT_MODE_LABELS } from "@/lib/purchase-calc";
 import { dateOnly, sumQty, toMilli } from "@/lib/stock-rules";
@@ -126,7 +126,7 @@ export async function createOrder(actor: CurrentUser, d: PurchaseOrderData, ip: 
     const docNo = await allocateDocNumber(tx, DOC_PREFIXES.PURCHASE_ORDER);
     const o = await tx.purchaseOrder.create({ data: { ...header(d, c), docNo, createdById: actor.id, lines: { create: lineRows(d, c) } } });
     await recomputeRequests(tx, requestIds, actor.id);
-    await enqueuePurchaseEvent(tx, { kind: "created", docType: "PO", docId: o.id, docNo: o.docNo, status: "DRAFT", actorId: actor.id });
+    await enqueuePurchaseEvent(tx, { kind: "created", docType: "PO", docId: o.id, docNo: o.docNo, status: "DRAFT", actorId: actor.id, actorName: fullName(actor) });
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_PO, entityId: o.id, action: "CREATE", after: await snapshot(tx, o.id), ip });
     return o;
   }, PURCHASE_TX);
@@ -192,7 +192,7 @@ export async function cancelOrder(actor: CurrentUser, id: string, reason: string
     });
     await recomputeRequests(tx, lines.map((l) => l.requestLine?.requestId).filter(Boolean) as string[], actor.id);
     await recordApprovalAction(tx, { docType: "PO", docId: id, round: row.approvalRound, stepNo: null, action: "CANCEL", actorId: actor.id, comment: reason });
-    await enqueuePurchaseEvent(tx, { kind: "cancelled", docType: "PO", docId: id, docNo: row.docNo, status: "CANCELLED", actorId: actor.id, comment: reason });
+    await enqueuePurchaseEvent(tx, { kind: "cancelled", docType: "PO", docId: id, docNo: row.docNo, status: "CANCELLED", actorId: actor.id, actorName: fullName(actor), comment: reason });
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_PO, entityId: id, action: "CANCEL", before, after: await snapshot(tx, id), note: `ยกเลิก: ${reason}`, ip });
     return row.docNo;
   }, PURCHASE_TX);

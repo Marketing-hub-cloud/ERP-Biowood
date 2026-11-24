@@ -56,6 +56,8 @@ test("กระดิ่ง: ผู้อนุมัติได้แจ้ง
   await expect(page.getByTestId("notification-row").filter({ hasText: `${pr.docNo} รออนุมัติจากคุณ` })).toHaveCount(0);
   await row.click();
   await expect(page).toHaveURL(new RegExp(`/purchase/requests/${pr.id}$`));
+  // คืนผังอนุมัติทันที (เทสอื่นในรอบเดียวกันคาดว่าไม่มีผัง)
+  expect((await page.request.put("/api/settings/approval/PR", { data: { steps: [] } })).status()).toBe(200);
 });
 
 test("ตั้งค่า LINE: เปิดใช้ + groupId → เอกสารใหม่เข้าคิว (ยังไม่ตั้ง token = รอส่ง) + ทดสอบส่ง + ส่งซ้ำ", async ({ page }) => {

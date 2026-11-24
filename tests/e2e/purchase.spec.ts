@@ -246,6 +246,8 @@ test("อนุมัติ 2 ลำดับ: ลำดับ 1 มี A,B แ�
   await expect(history).toContainText("จำนวนไม่ถูกต้อง");
   await cUser.ctx.close();
   expect(await docStatus(page, "requests", pr.id)).toBe("DRAFT");
+  // คืนผังอนุมัติทันที (เทสอื่นในรอบเดียวกันคาดว่าไม่มีผัง)
+  expect((await page.request.put("/api/settings/approval/PR", { data: { steps: [] } })).status()).toBe(200);
 });
 
 test("ใบส่งคืน: สร้างจาก PO → อนุมัติ → สร้าง > ใบนำออก (สแกน SN) → ส่งคืนแล้ว ยอดลด", async ({ page }) => {

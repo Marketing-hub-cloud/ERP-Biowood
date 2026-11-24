@@ -33,6 +33,8 @@ export type PurchaseEvent = {
   docNo: string;
   status: PurchaseStatus;
   actorId: string | null;
+  /** ชื่อผู้ทำ (ส่งมาถ้ามี จะได้ไม่ต้องค้นซ้ำ) */
+  actorName?: string | null;
   /** ลำดับที่เพิ่งอนุมัติ (step_approved/approved) */
   stepNo?: number | null;
   /** ลำดับที่รออนุมัติต่อ (submitted/step_approved) */
@@ -116,8 +118,11 @@ async function loadDoc(db: TxClient | DbClient, docType: ApprovalDocType, id: st
  * - LINE: เฉพาะเมื่อเปิดใช้และเลือกกลุ่มไว้ (ถ้ายังไม่ตั้ง token ข้อความจะรอในคิวจนกว่าจะตั้ง)
  */
 export async function enqueuePurchaseEvent(tx: TxClient, e: PurchaseEvent) {
-  const actor = e.actorId ? await tx.user.findUnique({ where: { id: e.actorId }, select: { firstName: true, lastName: true } }) : null;
-  const actorName = actor ? fullName(actor) : null;
+  let actorName = e.actorName ?? null;
+  if (actorName === null && e.actorId) {
+    const actor = await tx.user.findUnique({ where: { id: e.actorId }, select: { firstName: true, lastName: true } });
+    actorName = actor ? fullName(actor) : null;
+  }
   const doc = await loadDoc(tx, e.docType, e.docId);
   if (!doc) return;
 

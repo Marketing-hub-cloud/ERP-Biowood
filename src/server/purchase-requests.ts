@@ -66,7 +66,7 @@ export async function createRequest(actor: CurrentUser, d: PurchaseRequestData, 
     await assertRefs(tx, d);
     const docNo = await allocateDocNumber(tx, DOC_PREFIXES.PURCHASE_REQUEST);
     const r = await tx.purchaseRequest.create({ data: { ...header(d), docNo, createdById: actor.id, lines: { create: lineRows(d) } } });
-    await enqueuePurchaseEvent(tx, { kind: "created", docType: "PR", docId: r.id, docNo: r.docNo, status: "DRAFT", actorId: actor.id });
+    await enqueuePurchaseEvent(tx, { kind: "created", docType: "PR", docId: r.id, docNo: r.docNo, status: "DRAFT", actorId: actor.id, actorName: fullName(actor) });
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_PR, entityId: r.id, action: "CREATE", after: await snapshot(tx, r.id), ip });
     return r;
   }, PURCHASE_TX);
@@ -127,7 +127,7 @@ export async function cancelRequest(actor: CurrentUser, id: string, reason: stri
       data: { status: "CANCELLED", currentStep: null, cancelledAt: new Date(), cancelledById: actor.id, cancelReason: reason, updatedById: actor.id },
     });
     await recordApprovalAction(tx, { docType: "PR", docId: id, round: row.approvalRound, stepNo: null, action: "CANCEL", actorId: actor.id, comment: reason });
-    await enqueuePurchaseEvent(tx, { kind: "cancelled", docType: "PR", docId: id, docNo: row.docNo, status: "CANCELLED", actorId: actor.id, comment: reason });
+    await enqueuePurchaseEvent(tx, { kind: "cancelled", docType: "PR", docId: id, docNo: row.docNo, status: "CANCELLED", actorId: actor.id, actorName: fullName(actor), comment: reason });
     await writeAudit(tx, { actorId: actor.id, entityType: ENTITY_PR, entityId: id, action: "CANCEL", before, after: await snapshot(tx, id), note: `ยกเลิก: ${reason}`, ip });
     return row.docNo;
   }, PURCHASE_TX);

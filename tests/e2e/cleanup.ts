@@ -119,9 +119,9 @@ export async function cleanupTestData(): Promise<Record<string, number>> {
       n.orphanNotifications =
         (
           await c.query(`DELETE FROM notifications n WHERE
-            (n."docType" = PR AND NOT EXISTS (SELECT 1 FROM purchase_requests WHERE id = n."docId") AND n."docId" <> ALL($1)) OR
-            (n."docType" = PO AND NOT EXISTS (SELECT 1 FROM purchase_orders WHERE id = n."docId") AND n."docId" <> ALL($1)) OR
-            (n."docType" = RT AND NOT EXISTS (SELECT 1 FROM purchase_returns WHERE id = n."docId") AND n."docId" <> ALL($1))`, [purchaseDocs])
+            (n."docType" = 'PR' AND NOT EXISTS (SELECT 1 FROM purchase_requests WHERE id = n."docId") AND n."docId" <> ALL($1)) OR
+            (n."docType" = 'PO' AND NOT EXISTS (SELECT 1 FROM purchase_orders WHERE id = n."docId") AND n."docId" <> ALL($1)) OR
+            (n."docType" = 'RT' AND NOT EXISTS (SELECT 1 FROM purchase_returns WHERE id = n."docId") AND n."docId" <> ALL($1))`, [purchaseDocs])
         ).rowCount ?? 0;
 
       const all = [...users, ...groups, ...contacts, ...products, ...attributes, ...units, ...categories, ...locations, ...receipts, ...issues, ...purchaseDocs];

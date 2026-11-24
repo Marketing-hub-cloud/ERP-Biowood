@@ -192,7 +192,7 @@ export async function runApproval(
         docId: id,
         docNo: doc.docNo,
         status: t.status,
-        actorId: actor.id,
+        actorId: actor.id, actorName: fullName(actor),
         stepNo: action === "approve" ? doc.currentStep : null,
         nextStep: t.status === "PENDING" ? t.currentStep : null,
         comment,
