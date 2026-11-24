@@ -142,3 +142,166 @@ model CompanySetting {
 
   @@map("company_settings")
 }
+
+// ───────────────────────── ผู้ติดต่อ (เฟส 2) ─────────────────────────
+
+enum EntityType {
+  JURISTIC // นิติบุคคล
+  INDIVIDUAL // บุคคลธรรมดา
+}
+
+enum ChannelType {
+  PHONE
+  MOBILE
+  EMAIL
+  LINE
+  FACEBOOK
+  WEBSITE
+  FAX
+  OTHER
+}
+
+enum LookupKind {
+  CONTACT_SOURCE // ช่องทางที่รู้จัก
+  CUSTOMER_BUSINESS_TYPE // ประเภทกิจการของลูกค้า
+}
+
+model Contact {
+  id                     String     @id @default(cuid())
+  code                   String     @unique // CT00001 (สร้างอัตโนมัติ แก้ได้)
+  isCustomer             Boolean    @default(false)
+  isVendor               Boolean    @default(false)
+  entityType             EntityType @default(JURISTIC)
+  name                   String
+  taxId                  String?    @db.VarChar(13)
+  branch                 String?
+  sourceId               String?
+  customerBusinessTypeId String?
+  photoKey               String?
+  note                   String?
+
+  // ที่อยู่จดทะเบียน
+  regAddress     String?
+  regHouseNo     String?
+  regMoo         String?
+  regSoi         String?
+  regRoad        String?
+  regSubdistrict String?
+  regDistrict    String?
+  regProvince    String?
+  regPostalCode  String? @db.VarChar(10)
+  regCountry     String  @default("ไทย")
+
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  source               LookupOption?    @relation("ContactSource", fields: [sourceId], references: [id])
+  customerBusinessType LookupOption?    @relation("ContactBusinessType", fields: [customerBusinessTypeId], references: [id])
+  shippingAddresses    ContactAddress[]
+  channels             ContactChannel[]
+  persons              ContactPerson[]
+  tags                 ContactTag[]
+
+  @@index([isCustomer, deletedAt])
+  @@index([isVendor, deletedAt])
+  @@index([name])
+  @@map("contacts")
+}
+
+model ContactAddress {
+  id          String  @id @default(cuid())
+  contactId   String
+  label       String?
+  recipient   String?
+  phone       String?
+  address     String?
+  houseNo     String?
+  moo         String?
+  soi         String?
+  road        String?
+  subdistrict String?
+  district    String?
+  province    String?
+  postalCode  String? @db.VarChar(10)
+  country     String  @default("ไทย")
+  isDefault   Boolean @default(false)
+  sortOrder   Int     @default(0)
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@map("contact_addresses")
+}
+
+model ContactChannel {
+  id        String      @id @default(cuid())
+  contactId String
+  type      ChannelType
+  value     String
+  note      String?
+  sortOrder Int         @default(0)
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@index([value])
+  @@map("contact_channels")
+}
+
+model ContactPerson {
+  id        String  @id @default(cuid())
+  contactId String
+  name      String
+  position  String?
+  phone     String?
+  email     String?
+  lineId    String?
+  note      String?
+  isPrimary Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@map("contact_persons")
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String?
+  createdAt DateTime @default(now())
+
+  contacts ContactTag[]
+
+  @@map("tags")
+}
+
+model ContactTag {
+  contactId String
+  tagId     String
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+  @@index([tagId])
+  @@map("contact_tags")
+}
+
+model LookupOption {
+  id        String     @id @default(cuid())
+  kind      LookupKind
+  label     String
+  sortOrder Int        @default(0)
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+
+  contactsAsSource       Contact[] @relation("ContactSource")
+  contactsAsBusinessType Contact[] @relation("ContactBusinessType")
+
+  @@unique([kind, label])
+  @@map("lookup_options")
+}

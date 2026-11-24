@@ -60,6 +60,8 @@ type Props<T extends { id: string }> = {
   storageKey: string;
   searchPlaceholder?: string;
   toolbarExtra?: ReactNode;
+  /** query ที่ส่งทุกครั้ง (เช่น แท็บ f_role=customer) รวมถึงตอน Export */
+  fixedParams?: Record<string, string>;
 };
 
 function loadPrefs(key: string): { density?: Density; visibility?: VisibilityState } {
@@ -85,7 +87,9 @@ export function DataTable<T extends { id: string }>({
   storageKey,
   searchPlaceholder = "ค้นหา...",
   toolbarExtra,
+  fixedParams,
 }: Props<T>) {
+  const fixedKey = JSON.stringify(fixedParams ?? {});
   const router = useRouter();
   const [rows, setRows] = useState<T[]>([]);
   const [total, setTotal] = useState(0);
@@ -124,12 +128,12 @@ export function DataTable<T extends { id: string }>({
   }, [search]);
 
   const query = useMemo(() => {
-    const sp = new URLSearchParams();
+    const sp = new URLSearchParams(JSON.parse(fixedKey) as Record<string, string>);
     if (q) sp.set("q", q);
     for (const [k, v] of Object.entries(filterValues)) if (v) sp.set(`f_${k}`, v);
     if (sorting[0]) sp.set("sort", `${sorting[0].id}:${sorting[0].desc ? "desc" : "asc"}`);
     return sp;
-  }, [q, filterValues, sorting]);
+  }, [q, filterValues, sorting, fixedKey]);
 
   useEffect(() => {
     const ctrl = new AbortController();

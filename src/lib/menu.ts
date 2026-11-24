@@ -41,8 +41,8 @@ export const MENU: MenuSection[] = [
     label: "ผู้ติดต่อ",
     icon: "contacts",
     items: [
-      { key: "contacts.customer", label: "ลูกค้า", href: "/contacts/customers", actions: ALL },
-      { key: "contacts.vendor", label: "ผู้ขาย", href: "/contacts/vendors", actions: ALL },
+      { key: "contacts.customer", label: "ลูกค้า", href: "/contacts/customers", actions: ALL, ready: true },
+      { key: "contacts.vendor", label: "ผู้ขาย", href: "/contacts/vendors", actions: ALL, ready: true },
     ],
   },
   {

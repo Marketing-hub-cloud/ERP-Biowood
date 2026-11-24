@@ -2,12 +2,15 @@ import { ApiError, apiHandler } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { can } from "@/lib/rbac";
 import { fullName } from "@/lib/format";
+import { canOnContact } from "@/lib/contact-rules";
+import { ENTITY_CONTACT } from "@/server/contacts";
 
 /** entityType -> menuKey ที่ต้องมีสิทธิ์ view จึงดูประวัติได้ (เพิ่มเมื่อมีเอกสารใหม่) */
 const ENTITY_MENU: Record<string, string> = {
   User: "users.account",
   PermissionGroup: "users.group",
   CompanySetting: "settings.company",
+  // Contact: ตรวจตามบทบาทด้านล่าง
 };
 
 export type AuditEntry = {
@@ -24,11 +27,19 @@ export type AuditEntry = {
 export const GET = apiHandler({}, async ({ req, user }) => {
   const entityType = req.nextUrl.searchParams.get("entityType") ?? "";
   const entityId = req.nextUrl.searchParams.get("entityId") ?? "";
-  const menuKey = ENTITY_MENU[entityType];
-  if (!menuKey || !entityId) throw new ApiError(400, "พารามิเตอร์ไม่ถูกต้อง");
-  // ผู้ใช้ดูประวัติของบัญชีตัวเองได้เสมอ
-  const own = entityType === "User" && entityId === user.id;
-  if (!own && !can(user.permissions, menuKey, "view")) throw new ApiError(403, "ไม่มีสิทธิ์ใช้งาน");
+  if (!entityId) throw new ApiError(400, "พารามิเตอร์ไม่ถูกต้อง");
+  if (entityType === ENTITY_CONTACT) {
+    // ผู้ติดต่อ: สิทธิ์ตามบทบาท (ลูกค้า/ผู้ขาย) — ดูได้แม้ถูกลบไปแล้ว
+    const c = await prisma.contact.findUnique({ where: { id: entityId }, select: { isCustomer: true, isVendor: true } });
+    if (!c) throw new ApiError(404, "ไม่พบข้อมูล");
+    if (!canOnContact(user.permissions, c, "view")) throw new ApiError(403, "ไม่มีสิทธิ์ใช้งาน");
+  } else {
+    const menuKey = ENTITY_MENU[entityType];
+    if (!menuKey) throw new ApiError(400, "พารามิเตอร์ไม่ถูกต้อง");
+    // ผู้ใช้ดูประวัติของบัญชีตัวเองได้เสมอ
+    const own = entityType === "User" && entityId === user.id;
+    if (!own && !can(user.permissions, menuKey, "view")) throw new ApiError(403, "ไม่มีสิทธิ์ใช้งาน");
+  }
 
   const logs = await prisma.auditLog.findMany({
     where: { entityType, entityId },

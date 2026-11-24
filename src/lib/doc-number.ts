@@ -40,6 +40,21 @@ export async function allocateDocNumber(tx: TxClient | DbClient, prefix: string,
   return formatDocNumber(prefix, key, Number(rows[0].lastSeq));
 }
 
+/**
+ * ลำดับเลขแบบไม่รีเซ็ตรายวัน (เช่น รหัสผู้ติดต่อ CT00001)
+ * ใช้ตาราง counter เดียวกัน โดย dateKey = "" — atomic เหมือนเลขที่เอกสาร
+ */
+export async function allocateRunningCode(tx: TxClient | DbClient, prefix: string, digits = 5): Promise<string> {
+  const rows = await tx.$queryRaw<{ lastSeq: number }[]>`
+    INSERT INTO "document_counters" ("prefix", "dateKey", "lastSeq")
+    VALUES (${prefix}, '', 1)
+    ON CONFLICT ("prefix", "dateKey")
+    DO UPDATE SET "lastSeq" = "document_counters"."lastSeq" + 1
+    RETURNING "lastSeq"
+  `;
+  return `${prefix}${String(Number(rows[0].lastSeq)).padStart(digits, "0")}`;
+}
+
 /** เลขถัดไป (แสดงในฟอร์มเท่านั้น ไม่จองเลข) */
 export async function previewDocNumber(db: DbClient, prefix: string, date: Date = new Date()): Promise<string> {
   const key = dateKey(date);

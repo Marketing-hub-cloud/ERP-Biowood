@@ -42,6 +42,18 @@ const FIELD_LABEL: Record<string, string> = {
   phone: "เบอร์โทร",
   website: "เว็บไซต์",
   logoKey: "โลโก้",
+  code: "รหัส",
+  roles: "ประเภทผู้ติดต่อ",
+  entityType: "ประเภทกิจการ",
+  source: "ช่องทางที่รู้จัก",
+  customerBusinessType: "ประเภทกิจการของลูกค้า",
+  note: "หมายเหตุ",
+  photoKey: "รูป",
+  regAddressText: "ที่อยู่จดทะเบียน",
+  shippingAddresses: "ที่อยู่จัดส่ง",
+  channels: "ช่องทางติดต่อ",
+  persons: "บุคคลติดต่อ",
+  tags: "กลุ่ม",
 };
 
 const VALUE_LABEL: Record<string, string> = { ACTIVE: "ใช้งาน", INACTIVE: "หยุดใช้งาน", true: "ใช่", false: "ไม่ใช่" };
