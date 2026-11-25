@@ -55,7 +55,7 @@ export function checkRoleChange(perms: PermissionMap, before: RoleFlags | null, 
 
 /** เลือกผู้ติดต่อในเอกสารได้: ผู้ที่สร้าง/แก้เอกสารที่ต้องเลือกผู้ติดต่อ (แม้ไม่มีสิทธิ์เมนูผู้ติดต่อ) หรือผู้ที่ดูผู้ติดต่อได้ */
 export function canPickContacts(perms: PermissionMap) {
-  const docs = ["inventory.issue", "purchase.order", "purchase.return", "engineer.document"];
+  const docs = ["inventory.issue", "purchase.order", "purchase.return", "engineer.document", "crm.project", "crm.plan"];
   return (
     docs.some((m) => can(perms, m, "create") || can(perms, m, "edit")) ||
     can(perms, "contacts.customer", "view") ||

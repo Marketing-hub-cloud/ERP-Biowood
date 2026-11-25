@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { PERMISSION_MENU_KEYS } from "./menu";
 import { MAX_SERIALS_PER_BATCH, parseQty, QTY_DECIMALS } from "./stock-rules";
+import { bangkokLocalToDate } from "./date-input";
 
 const optionalText = z
   .string()
@@ -236,7 +237,7 @@ export type ContactInput = z.input<typeof contactSchema>;
 export type ContactData = z.output<typeof contactSchema>;
 
 export const lookupSchema = z.object({
-  kind: z.enum(["CONTACT_SOURCE", "CUSTOMER_BUSINESS_TYPE", "PRODUCT_TYPE", "RETURN_REASON"]),
+  kind: z.enum(["CONTACT_SOURCE", "CUSTOMER_BUSINESS_TYPE", "PRODUCT_TYPE", "RETURN_REASON", "PROJECT_WORK_STAGE", "PROJECT_WORK_NATURE"]),
   label: required("ชื่อตัวเลือก", 100),
 });
 
@@ -551,6 +552,7 @@ export const engineerDocSchema = z
     addressLabel: text(200),
     siteAddress: text(1000),
     assigneeId: text(50),
+    projectId: text(50),
     participantIds: z.array(z.string().min(1)).max(50).default([]).transform((xs) => [...new Set(xs)]),
     note: text(2000),
     estimateLines: z.array(estimateLineSchema).max(200, "ไม่เกิน 200 รายการ").default([]),
@@ -565,3 +567,86 @@ export const engineerActionSchema = z.object({
   from: z.enum(["DRAFT", "NEW", "REVIEWED", "QUEUED", "ASSIGNED", "IN_PROGRESS", "INSPECTION", "ESTIMATE", "COMPLETED", "CANCELLED"]).optional(),
   comment: z.string().trim().max(1000).optional().nullable(),
 });
+
+// ───────────────────────── เฟส 8: CRM ─────────────────────────
+
+const money2 = z
+  .union([z.number(), z.string()])
+  .optional()
+  .nullable()
+  .transform((v, ctx) => {
+    if (v === null || v === undefined || v === "") return null;
+    const s = String(v).replace(/,/g, "").trim();
+    if (!/^\d+(\.\d{1,2})?$/.test(s)) {
+      ctx.addIssue({ code: "custom", message: "มูลค่าต้องเป็นตัวเลขไม่ติดลบ ทศนิยมไม่เกิน 2 ตำแหน่ง" });
+      return z.NEVER;
+    }
+    return Number(s);
+  })
+  .refine((n) => n === null || n < 1e12, "มูลค่ามากเกินไป");
+
+export const projectSchema = z
+  .object({
+    name: required("ชื่อโครงการ", 255),
+    status: z.enum(["NEW", "IN_PROGRESS", "QUOTED", "WON", "CLOSED", "AFTERCARE", "ENGINEERING", "SHIPPING", "PAYMENT"]).default("NEW"),
+    customerId: z.string({ error: "กรุณาเลือกลูกค้า" }).min(1, "กรุณาเลือกลูกค้า"),
+    contactPerson: text(200),
+    salesRepId: text(50),
+    businessTypeId: text(50),
+    workStageId: text(50),
+    workNatureId: text(50),
+    workDetail: text(2000),
+    probability: z
+      .union([z.number(), z.string()])
+      .optional()
+      .nullable()
+      .transform((v) => (v === null || v === undefined || v === "" ? null : Number(v)))
+      .refine((n) => n === null || (Number.isInteger(n) && n >= 10 && n <= 100 && n % 10 === 0), "% โอกาสสำเร็จต้องเป็น 10–100"),
+    expectedCloseDate: optionalDate,
+    value: money2,
+    tagIds: z.array(z.string()).max(50).default([]).transform((xs) => [...new Set(xs)]),
+    warrantyStart: optionalDate,
+    warrantyEnd: optionalDate,
+    warrantyNote: text(1000),
+    note: text(2000),
+  })
+  .refine((d) => !d.warrantyStart || !d.warrantyEnd || d.warrantyEnd >= d.warrantyStart, {
+    message: "วันสิ้นสุดการรับประกันต้องไม่ก่อนวันเริ่ม",
+    path: ["warrantyEnd"],
+  });
+export type ProjectInput = z.input<typeof projectSchema>;
+export type ProjectData = z.output<typeof projectSchema>;
+
+const localDateTime = (label: string) =>
+  z
+    .string({ error: `กรุณาระบุ${label}` })
+    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, `กรุณาระบุ${label}`)
+    .refine((s) => bangkokLocalToDate(s) !== null, `${label}ไม่ถูกต้อง`);
+
+export const workPlanSchema = z
+  .object({
+    subject: required("เรื่อง", 255),
+    plannedStart: localDateTime("วันเวลาเริ่ม"),
+    plannedEnd: localDateTime("วันเวลาสิ้นสุด"),
+    employeeId: z.string({ error: "กรุณาเลือกพนักงาน" }).min(1, "กรุณาเลือกพนักงาน"),
+    customerId: text(50),
+    projectId: text(50),
+    location: text(500),
+    detail: text(2000),
+  })
+  .refine((d) => d.plannedEnd >= d.plannedStart, { message: "วันเวลาสิ้นสุดต้องไม่ก่อนวันเวลาเริ่ม", path: ["plannedEnd"] });
+export type WorkPlanInput = z.input<typeof workPlanSchema>;
+export type WorkPlanData = z.output<typeof workPlanSchema>;
+
+export const planActionSchema = z
+  .object({
+    action: z.enum(["checkin_start", "checkin_end", "complete", "cancel"]),
+    lat: z.number().min(-90).max(90).optional().nullable(),
+    lng: z.number().min(-180).max(180).optional().nullable(),
+    accuracy: z.number().min(0).max(100_000).optional().nullable(),
+    reason: z.string().trim().max(500).optional().nullable(),
+  })
+  .refine((d) => !d.action.startsWith("checkin") || (typeof d.lat === "number" && typeof d.lng === "number"), {
+    message: "ไม่พบพิกัด กรุณาอนุญาตการเข้าถึงตำแหน่ง",
+    path: ["lat"],
+  });

@@ -90,6 +90,31 @@ const FIELD_LABEL: Record<string, string> = {
   participants: "ผู้เกี่ยวข้อง",
   estimateLines: "ใบสรุปประมาณถอดแบบ",
   files: "ไฟล์แนบ",
+  project: "โครงการ",
+  // โครงการ (CRM)
+  contactPerson: "บุคคลติดต่อ",
+  salesRep: "พนักงานขาย",
+  businessType: "ประเภทกิจการ",
+  workStage: "ขั้นตอนของงาน",
+  workNature: "ลักษณะงาน",
+  probability: "% โอกาสสำเร็จ",
+  expectedCloseDate: "วันคาดการณ์ปิดดีล",
+  value: "มูลค่า",
+  warrantyStart: "เริ่มรับประกัน",
+  warrantyEnd: "สิ้นสุดรับประกัน",
+  warrantyNote: "หมายเหตุการรับประกัน",
+  // แผนการทำงาน
+  subject: "เรื่อง",
+  plannedStart: "เริ่ม (วางแผน)",
+  plannedEnd: "สิ้นสุด (วางแผน)",
+  employee: "พนักงาน",
+  location: "สถานที่",
+  detail: "รายละเอียด",
+  startPoint: "พิกัดจุดเริ่มต้น",
+  startAt: "เวลาเช็คอินจุดเริ่มต้น",
+  endPoint: "พิกัดจุดหมาย",
+  endAt: "เวลาเช็คอินจุดหมาย",
+  distanceKm: "ระยะทาง (กม.)",
 };
 
 const VALUE_LABEL: Record<string, string> = { ACTIVE: "ใช้งาน", INACTIVE: "หยุดใช้งาน", true: "ใช่", false: "ไม่ใช่" };

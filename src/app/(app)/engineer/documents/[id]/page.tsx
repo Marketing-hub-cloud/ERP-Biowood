@@ -68,6 +68,7 @@ export default async function EngineerDocPage({ params }: PageProps<"/engineer/d
             workTypes: d.workTypes,
             workDetail: d.workDetail ?? "",
             projectName: d.projectName,
+            project: d.project,
             urgency: d.urgency,
             customer: d.customer,
             addressLabel: d.addressLabel ?? "",

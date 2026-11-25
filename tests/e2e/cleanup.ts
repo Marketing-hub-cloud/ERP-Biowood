@@ -109,17 +109,32 @@ export async function cleanupTestData(): Promise<Record<string, number>> {
       await c.query(`DELETE FROM approval_actions WHERE "docId" = ANY($1) OR "actorId" = ANY($2)`, [purchaseDocs, users]);
       await c.query(`DELETE FROM approval_step_approvers WHERE "userId" = ANY($1)`, [users]);
       await c.query(`DELETE FROM approval_steps s WHERE NOT EXISTS (SELECT 1 FROM approval_step_approvers a WHERE a."stepId" = s.id)`);
-      // ใบถอดแบบ/ติดตั้ง (เฟส 7): ของผู้ใช้/ลูกค้า/สินค้าทดสอบ หรือชื่อโครงการมี marker
+      // โครงการ / แผนการทำงาน (เฟส 8): ของผู้ใช้/ลูกค้าทดสอบ หรือชื่อมี marker
+      const projects = await ids(
+        c,
+        `SELECT id FROM projects WHERE "createdById" = ANY($1) OR "salesRepId" = ANY($1) OR "customerId" = ANY($2) OR name ILIKE $3`,
+        [users, contacts, MARK],
+      );
+      const plans = await ids(
+        c,
+        `SELECT id FROM work_plans WHERE "createdById" = ANY($1) OR "employeeId" = ANY($1) OR "customerId" = ANY($2) OR "projectId" = ANY($3) OR subject ILIKE $4`,
+        [users, contacts, projects, MARK],
+      );
+      n.workPlans = (await c.query(`DELETE FROM work_plans WHERE id = ANY($1)`, [plans])).rowCount ?? 0;
+
+      // ใบถอดแบบ/ติดตั้ง (เฟส 7): ของผู้ใช้/ลูกค้า/สินค้า/โครงการทดสอบ หรือชื่อโครงการมี marker
       const engineerDocs = await ids(
         c,
-        `SELECT id FROM engineer_docs d WHERE "createdById" = ANY($1) OR "assigneeId" = ANY($1) OR "customerId" = ANY($2) OR "projectName" ILIKE $4
+        `SELECT id FROM engineer_docs d WHERE "createdById" = ANY($1) OR "assigneeId" = ANY($1) OR "customerId" = ANY($2) OR "projectName" ILIKE $4 OR "projectId" = ANY($5)
            OR EXISTS (SELECT 1 FROM engineer_participants p WHERE p."docId" = d.id AND p."userId" = ANY($1))
            OR EXISTS (SELECT 1 FROM engineer_estimate_lines l WHERE l."docId" = d.id AND l."productId" = ANY($3))`,
-        [users, contacts, products, MARK],
+        [users, contacts, products, MARK, projects],
       );
       files.push(...(await c.query(`SELECT key FROM engineer_files WHERE "docId" = ANY($1)`, [engineerDocs])).rows.map((r) => r.key));
       n.engineerDocs = (await c.query(`DELETE FROM engineer_docs WHERE id = ANY($1)`, [engineerDocs])).rowCount ?? 0;
       purchaseDocs.push(...engineerDocs); // ใช้ลบแจ้งเตือน/คิว LINE/audit ด้านล่างร่วมกัน
+      n.projects = (await c.query(`DELETE FROM projects WHERE id = ANY($1)`, [projects])).rowCount ?? 0;
+      purchaseDocs.push(...projects, ...plans); // audit log
 
       n.noteTemplates = (await c.query(`DELETE FROM note_templates WHERE title ILIKE $1 OR body ILIKE $1`, [MARK])).rowCount ?? 0;
       // แจ้งเตือน (เฟส 6): ของเอกสารทดสอบ / ข้อความที่มี marker / กลุ่ม LINE ทดสอบ

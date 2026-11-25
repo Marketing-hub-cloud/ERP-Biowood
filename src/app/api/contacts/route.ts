@@ -33,6 +33,7 @@ const listInclude = {
   channels: { orderBy: { sortOrder: "asc" } },
   persons: { orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }], take: 1 },
   tags: { include: { tag: true } },
+  _count: { select: { projects: { where: { deletedAt: null } } } },
   source: true,
   customerBusinessType: true,
 } satisfies Prisma.ContactInclude;
@@ -53,7 +54,7 @@ const toRow = (c: ListContact): ContactRow => ({
   province: c.regProvince,
   primaryChannel: c.channels[0] ? { type: c.channels[0].type, value: c.channels[0].value } : null,
   primaryPerson: c.persons[0]?.name ?? null,
-  projectCount: 0, // โครงการ CRM มาในเฟส 8
+  projectCount: c._count.projects,
   createdAt: c.createdAt.toISOString(),
 });
 
@@ -131,7 +132,7 @@ export const GET = apiHandler({}, async ({ req, user }) => {
       },
       { header: "จังหวัด", value: (c) => c.regProvince },
       { header: "บุคคลติดต่อ", value: (c) => c.persons.map((x) => [x.name, x.position && `(${x.position})`, x.phone].filter(Boolean).join(" ")).join("; ") },
-      { header: "จำนวนโครงการ", value: () => 0 },
+      { header: "จำนวนโครงการ", value: (c) => c._count.projects },
       { header: "วันที่สร้าง", value: (c) => formatDateTime(c.createdAt) },
     ]);
     const name = p.filters.role === "customer" ? "customers" : p.filters.role === "vendor" ? "vendors" : "contacts";

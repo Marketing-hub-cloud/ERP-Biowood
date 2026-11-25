@@ -1,4 +1,5 @@
 import { requirePagePermission } from "@/lib/session";
+import { prisma } from "@/lib/db";
 import { todayBangkok } from "@/lib/stock-rules";
 import { getEngineerFormOptions } from "@/server/engineer-docs";
 import { PageHeader } from "@/components/page-header";
@@ -7,9 +8,20 @@ import { EngineerForm } from "../engineer-form";
 
 export const metadata = { title: "สร้างใบถอดแบบ/ติดตั้ง" };
 
-export default async function NewEngineerDocPage() {
+/** ?project=<projectId> (ปุ่ม "สร้างใบถอดแบบ" ในหน้าโครงการ) ดึงลูกค้าและชื่อโครงการมาให้ */
+export default async function NewEngineerDocPage({ searchParams }: PageProps<"/engineer/documents/new">) {
   const user = await requirePagePermission("engineer.document", "create");
-  const options = await getEngineerFormOptions();
+  const sp = await searchParams;
+  const projectId = typeof sp.project === "string" ? sp.project : null;
+  const [options, project] = await Promise.all([
+    getEngineerFormOptions(),
+    projectId
+      ? prisma.project.findFirst({
+          where: { id: projectId, deletedAt: null },
+          select: { id: true, name: true, customer: { select: { id: true, code: true, name: true, isCustomer: true, isVendor: true } } },
+        })
+      : null,
+  ]);
   return (
     <>
       <PageHeader
@@ -31,9 +43,10 @@ export default async function NewEngineerDocPage() {
             revision: "1",
             workTypes: ["SURVEY"],
             workDetail: "",
-            projectName: "",
+            projectName: project?.name ?? "",
+            project,
             urgency: "NORMAL",
-            customer: null,
+            customer: project?.customer ?? null,
             addressLabel: "",
             siteAddress: "",
             assigneeId: "",

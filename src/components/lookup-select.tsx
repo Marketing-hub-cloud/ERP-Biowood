@@ -27,7 +27,7 @@ export function LookupSelect({
   placeholder = "เลือก",
 }: {
   id?: string;
-  kind: "CONTACT_SOURCE" | "CUSTOMER_BUSINESS_TYPE" | "PRODUCT_TYPE" | "RETURN_REASON";
+  kind: "CONTACT_SOURCE" | "CUSTOMER_BUSINESS_TYPE" | "PRODUCT_TYPE" | "RETURN_REASON" | "PROJECT_WORK_STAGE" | "PROJECT_WORK_NATURE";
   value: string | null;
   onChange: (v: string | null) => void;
   options: Option[];

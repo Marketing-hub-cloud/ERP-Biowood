@@ -21,6 +21,8 @@ const ENTITY_MENU: Record<string, string> = {
   PurchaseOrder: "purchase.order",
   PurchaseReturn: "purchase.return",
   EngineerDoc: "engineer.document",
+  Project: "crm.project",
+  WorkPlan: "crm.plan",
   ApprovalSetting: "settings.approval",
   NoteTemplate: "settings.remark",
   NotificationSetting: "settings.notification",

@@ -33,6 +33,7 @@ import {
 } from "@/lib/engineer-workflow";
 import type { EngineerFormOptions } from "@/server/engineer-docs";
 import type { ContactOption } from "@/app/api/contact-options/route";
+import { ProjectPicker, type PickedProject } from "@/components/project-picker";
 import { CustomerBox, ParticipantPicker } from "./engineer-ui";
 
 export type EstimateLineValues = { key: string; productId: string; quantity: string; note: string };
@@ -44,6 +45,7 @@ export type EngineerValues = {
   workTypes: EngineerWorkType[];
   workDetail: string;
   projectName: string;
+  project: PickedProject | null;
   urgency: EngineerUrgency;
   customer: ContactOption | null;
   addressLabel: string;
@@ -65,6 +67,7 @@ const payload = (v: EngineerValues) => ({
   workTypes: v.workTypes,
   workDetail: v.workDetail,
   projectName: v.projectName,
+  projectId: v.project?.id ?? null,
   urgency: v.urgency,
   customerId: v.customer?.id ?? null,
   addressLabel: v.addressLabel,
@@ -246,6 +249,23 @@ export function EngineerForm({
           <div className="hidden lg:block" />
           <FormField label="ชื่อโครงการ" htmlFor="projectName" required error={err("projectName")} className="sm:col-span-2">
             <Input id="projectName" value={v.projectName} onChange={(e) => set("projectName", e.target.value)} disabled={!editable} />
+          </FormField>
+          <FormField label="โครงการ CRM" htmlFor="projectId" error={err("projectId")} className="sm:col-span-2">
+            <ProjectPicker
+              id="projectId"
+              value={v.project}
+              customerId={v.customer?.id}
+              onChange={(p) =>
+                setV((s) => ({
+                  ...s,
+                  project: p,
+                  projectName: p && !s.projectName.trim() ? p.name : s.projectName,
+                  // เลือกโครงการ: ใช้ลูกค้าของโครงการถ้ายังไม่ได้เลือก
+                  ...(p && !s.customer ? { customer: p.customer, addressLabel: "", siteAddress: "" } : {}),
+                }))
+              }
+              disabled={!editable}
+            />
           </FormField>
           <FormField label="ข้อมูลลักษณะงาน" htmlFor="workDetail" error={err("workDetail")} className="sm:col-span-2">
             <Textarea id="workDetail" rows={2} value={v.workDetail} onChange={(e) => set("workDetail", e.target.value)} disabled={!editable} />

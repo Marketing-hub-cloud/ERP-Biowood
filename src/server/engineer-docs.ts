@@ -32,6 +32,7 @@ const userSel = { select: { id: true, firstName: true, lastName: true, avatarKey
 
 export const engineerInclude = {
   customer: { select: { id: true, code: true, name: true, isCustomer: true, isVendor: true } },
+  project: { select: { id: true, name: true, customer: { select: { id: true, code: true, name: true, isCustomer: true, isVendor: true } } } },
   assignee: userSel,
   createdBy: userSel,
   cancelledBy: userSel,
@@ -51,6 +52,7 @@ async function snapshot(tx: TxClient, id: string) {
     workTypes: d.workTypes.map((w) => WORK_TYPE_LABELS[w]),
     workDetail: d.workDetail,
     projectName: d.projectName,
+    project: d.project?.name ?? null,
     urgency: URGENCY_LABELS[d.urgency],
     customer: d.customer ? `${d.customer.code} ${d.customer.name}` : null,
     siteAddress: d.siteAddress,
@@ -76,6 +78,10 @@ async function assertRefs(tx: TxClient, d: EngineerDocData, current?: EngineerFu
     const c = await tx.contact.findFirst({ where: { id: d.customerId, deletedAt: null } });
     if (!c) throw new ApiError(400, "ไม่พบลูกค้า", { customerId: "ไม่พบลูกค้า" });
     if (!c.isCustomer) throw new ApiError(400, "ผู้ติดต่อนี้ไม่ได้เป็นลูกค้า", { customerId: "ผู้ติดต่อนี้ไม่ได้เป็นลูกค้า" });
+  }
+  if (d.projectId && d.projectId !== current?.projectId) {
+    const p = await tx.project.findFirst({ where: { id: d.projectId, deletedAt: null } });
+    if (!p) throw new ApiError(400, "ไม่พบโครงการ", { projectId: "ไม่พบโครงการ" });
   }
   const keepUsers = new Set([current?.assigneeId, ...(current?.participants.map((p) => p.userId) ?? [])].filter(Boolean) as string[]);
   const userIds = [...new Set([d.assigneeId, ...d.participantIds].filter(Boolean) as string[])];
@@ -108,6 +114,7 @@ const header = (d: EngineerDocData) => ({
   workTypes: d.workTypes,
   workDetail: d.workDetail,
   projectName: d.projectName,
+  projectId: d.projectId,
   urgency: d.urgency,
   customerId: d.customerId,
   addressLabel: d.customerId ? d.addressLabel : null,

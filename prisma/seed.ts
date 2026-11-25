@@ -110,13 +110,15 @@ async function main() {
   const LOOKUPS = {
     CONTACT_SOURCE: ["Facebook", "Google", "LINE", "แนะนำต่อ", "งานแสดงสินค้า", "หน้าร้าน"],
     CUSTOMER_BUSINESS_TYPE: ["บ้านส่วนตัว", "คอนโด", "โรงแรม/รีสอร์ท", "อาคารพาณิชย์", "ผู้รับเหมา", "สถาปนิก/ผู้ออกแบบ"],
+    PROJECT_WORK_STAGE: ["ออกแบบ", "ก่อสร้าง", "ตกแต่ง", "รีโนเวท/ซ่อมแซม"],
+    PROJECT_WORK_NATURE: ["เทียบสเปค", "เสนอสเปค", "ประมูล", "ซื้อตรง"],
   } as const;
   for (const [kind, labels] of Object.entries(LOOKUPS) as [keyof typeof LOOKUPS, readonly string[]][]) {
     for (const [i, label] of labels.entries()) {
       await prisma.lookupOption.upsert({ where: { kind_label: { kind, label } }, update: {}, create: { kind, label, sortOrder: i } });
     }
   }
-  console.log("✔ ตัวเลือกช่องทางที่รู้จัก / ประเภทกิจการของลูกค้า");
+  console.log("✔ ตัวเลือกช่องทางที่รู้จัก / ประเภทกิจการของลูกค้า / ขั้นตอนและลักษณะงานของโครงการ");
 
   // ผู้ติดต่อตัวอย่าง (สร้างเฉพาะครั้งแรก)
   if ((await prisma.contact.count()) === 0) {

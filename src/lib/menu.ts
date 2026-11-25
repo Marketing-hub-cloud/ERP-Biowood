@@ -53,8 +53,8 @@ export const MENU: MenuSection[] = [
     label: "การขาย (CRM)",
     icon: "crm",
     items: [
-      { key: "crm.project", label: "โครงการ", href: "/crm/projects", actions: ALL },
-      { key: "crm.plan", label: "แผนการทำงาน", href: "/crm/plans", actions: ALL },
+      { key: "crm.project", label: "โครงการ", href: "/crm/projects", actions: ALL, ready: true },
+      { key: "crm.plan", label: "แผนการทำงาน", href: "/crm/plans", actions: ALL, ready: true },
       { key: "crm.report", label: "รายงาน", href: "/crm/reports", actions: VIEW_ONLY },
     ],
   },

@@ -8,8 +8,13 @@ import { canManageContactOptions } from "@/server/contacts";
 export const POST = apiHandler({}, async ({ req, user }) => {
   const { kind, label } = lookupSchema.parse(await readJson(req));
   // ประเภทสินค้า: ผู้สร้าง/แก้ไขสินค้าได้ / เหตุผลการคืน: ผู้สร้าง/แก้ไขใบส่งคืนได้ / ตัวเลือกผู้ติดต่อ: ผู้สร้าง/แก้ไขผู้ติดต่อได้
-  const docMenu = kind === "PRODUCT_TYPE" ? "inventory.product" : kind === "RETURN_REASON" ? "purchase.return" : null;
-  const allowed = docMenu ? can(user.permissions, docMenu, "create") || can(user.permissions, docMenu, "edit") : canManageContactOptions(user);
+  // ขั้นตอน/ลักษณะงานของโครงการ: ผู้สร้าง/แก้ไขโครงการได้ / ประเภทกิจการของลูกค้า: ผู้ติดต่อ หรือโครงการ
+  const docMenu =
+    kind === "PRODUCT_TYPE" ? "inventory.product" : kind === "RETURN_REASON" ? "purchase.return" : kind.startsWith("PROJECT_") ? "crm.project" : null;
+  const editProject = can(user.permissions, "crm.project", "create") || can(user.permissions, "crm.project", "edit");
+  const allowed = docMenu
+    ? can(user.permissions, docMenu, "create") || can(user.permissions, docMenu, "edit")
+    : canManageContactOptions(user) || (kind === "CUSTOMER_BUSINESS_TYPE" && editProject);
   if (!allowed) throw new ApiError(403, "ไม่มีสิทธิ์ใช้งาน");
   const o = await prisma.lookupOption.upsert({
     where: { kind_label: { kind, label } },

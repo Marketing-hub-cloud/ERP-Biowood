@@ -63,6 +63,10 @@ model User {
   engineerParticipants EngineerParticipant[] @relation("EngineerParticipantUser")
   engineerFiles        EngineerFile[]        @relation("EngineerFileUploadedBy")
   engineerStepLogs     EngineerStepLog[]     @relation("EngineerStepActor")
+  projectsAsSalesRep   Project[]             @relation("ProjectSalesRep")
+  projectsCreated      Project[]             @relation("ProjectCreatedBy")
+  workPlans            WorkPlan[]            @relation("WorkPlanEmployee")
+  workPlansCreated     WorkPlan[]            @relation("WorkPlanCreatedBy")
 
   @@map("users")
 }
@@ -194,6 +198,8 @@ enum LookupKind {
   CUSTOMER_BUSINESS_TYPE // ประเภทกิจการของลูกค้า
   PRODUCT_TYPE // ประเภทสินค้า
   RETURN_REASON // เหตุผลการส่งคืนสินค้า (จัดซื้อ)
+  PROJECT_WORK_STAGE // ขั้นตอนของงาน (โครงการ)
+  PROJECT_WORK_NATURE // ลักษณะงาน (โครงการ)
 }
 
 model Contact {
@@ -237,6 +243,8 @@ model Contact {
   purchaseOrders       PurchaseOrder[]  @relation("PoVendor")
   purchaseReturns      PurchaseReturn[] @relation("RtVendor")
   engineerDocs         EngineerDoc[]    @relation("EngineerCustomer")
+  projects             Project[]        @relation("ProjectCustomer")
+  workPlans            WorkPlan[]       @relation("WorkPlanCustomer")
 
   @@index([isCustomer, deletedAt])
   @@index([isVendor, deletedAt])
@@ -309,6 +317,7 @@ model Tag {
   createdAt DateTime @default(now())
 
   contacts ContactTag[]
+  projects ProjectTag[]
 
   @@map("tags")
 }
@@ -337,6 +346,9 @@ model LookupOption {
   contactsAsBusinessType Contact[]        @relation("ContactBusinessType")
   products               Product[]        @relation("ProductType")
   purchaseReturns        PurchaseReturn[] @relation("ReturnReason")
+  projectsAsBusinessType Project[]        @relation("ProjectBusinessType")
+  projectsAsWorkStage    Project[]        @relation("ProjectWorkStage")
+  projectsAsWorkNature   Project[]        @relation("ProjectWorkNature")
 
   @@unique([kind, label])
   @@map("lookup_options")
@@ -1065,6 +1077,7 @@ model EngineerDoc {
   addressLabel  String? // ที่อยู่ที่เลือก เช่น "ที่อยู่จดทะเบียน"
   siteAddress   String? // ข้อความที่อยู่ (คัดลอกจากผู้ติดต่อ แก้ต่อได้)
   assigneeId    String? // ผู้รับผิดชอบงาน (ขั้น "มอบหมาย")
+  projectId     String? // โครงการ CRM (เฟส 8)
   note          String?
   completedAt   DateTime?
   cancelledAt   DateTime?
@@ -1076,6 +1089,7 @@ model EngineerDoc {
   updatedAt     DateTime           @updatedAt
 
   customer      Contact?               @relation("EngineerCustomer", fields: [customerId], references: [id])
+  project       Project?               @relation(fields: [projectId], references: [id])
   assignee      User?                  @relation("EngineerAssignee", fields: [assigneeId], references: [id])
   createdBy     User                   @relation("EngineerCreatedBy", fields: [createdById], references: [id])
   cancelledBy   User?                  @relation("EngineerCancelledBy", fields: [cancelledById], references: [id])
@@ -1086,6 +1100,7 @@ model EngineerDoc {
 
   @@index([status, docDate])
   @@index([customerId])
+  @@index([projectId])
   @@index([assigneeId])
   @@map("engineer_docs")
 }
@@ -1153,4 +1168,123 @@ model EngineerStepLog {
 
   @@index([docId, createdAt])
   @@map("engineer_step_logs")
+}
+
+// ───────────────────────── เฟส 8: CRM ─────────────────────────
+
+/// สถานะโครงการ (stepper แนวนอน)
+enum ProjectStatus {
+  NEW // โครงการใหม่
+  IN_PROGRESS // กำลังดำเนินการ
+  QUOTED // เสนอราคา
+  WON // ปิดได้
+  CLOSED // จบโครงการ
+  AFTERCARE // ดูแลงาน
+  ENGINEERING // ถอดแบบ/ติดตั้ง
+  SHIPPING // ขนส่ง
+  PAYMENT // ชำระเงิน
+}
+
+/// โครงการ (CRM)
+model Project {
+  id                String        @id @default(cuid())
+  name              String
+  status            ProjectStatus @default(NEW)
+  customerId        String
+  contactPerson     String? // บุคคลติดต่อ (คัดลอกชื่อจากผู้ติดต่อ — บุคคลติดต่อถูกสร้างใหม่ทุกครั้งที่แก้ผู้ติดต่อ)
+  salesRepId        String? // พนักงานขายผู้รับผิดชอบ
+  businessTypeId    String? // ประเภทกิจการ (เช่น บ้านส่วนตัว)
+  workStageId       String? // ขั้นตอนของงาน (เช่น ก่อสร้าง)
+  workNatureId      String? // ลักษณะงาน (เช่น เทียบสเปค)
+  workDetail        String? // ข้อมูลลักษณะงาน
+  probability       Int? // % โอกาสสำเร็จ 10–100
+  expectedCloseDate DateTime?     @db.Date
+  value             Decimal?      @db.Decimal(14, 2)
+  warrantyStart     DateTime?     @db.Date
+  warrantyEnd       DateTime?     @db.Date
+  warrantyNote      String?
+  note              String?
+  createdById       String
+  updatedById       String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  deletedAt         DateTime?
+
+  customer     Contact       @relation("ProjectCustomer", fields: [customerId], references: [id])
+  salesRep     User?         @relation("ProjectSalesRep", fields: [salesRepId], references: [id])
+  createdBy    User          @relation("ProjectCreatedBy", fields: [createdById], references: [id])
+  businessType LookupOption? @relation("ProjectBusinessType", fields: [businessTypeId], references: [id])
+  workStage    LookupOption? @relation("ProjectWorkStage", fields: [workStageId], references: [id])
+  workNature   LookupOption? @relation("ProjectWorkNature", fields: [workNatureId], references: [id])
+  tags         ProjectTag[]
+  engineerDocs EngineerDoc[]
+  workPlans    WorkPlan[]
+
+  @@index([customerId, deletedAt])
+  @@index([salesRepId])
+  @@index([status])
+  @@map("projects")
+}
+
+model ProjectTag {
+  projectId String
+  tagId     String
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, tagId])
+  @@index([tagId])
+  @@map("project_tags")
+}
+
+enum WorkPlanStatus {
+  PLANNED // วางแผน
+  CHECKED_IN // เช็คอิน
+  DONE // เสร็จสิ้น
+  CANCELLED // ยกเลิก
+}
+
+/// แผนการทำงาน (นัดหมาย/เยี่ยมลูกค้า) + เช็คอิน GPS
+model WorkPlan {
+  id           String         @id @default(cuid())
+  subject      String
+  status       WorkPlanStatus @default(PLANNED)
+  plannedStart DateTime
+  plannedEnd   DateTime
+  employeeId   String
+  customerId   String?
+  projectId    String?
+  location     String?
+  detail       String?
+
+  // เช็คอิน จุดเริ่มต้น / จุดหมาย (เวลาใช้เวลาของ server)
+  startLat       Decimal?  @db.Decimal(9, 6)
+  startLng       Decimal?  @db.Decimal(9, 6)
+  startAccuracy  Int? // เมตร
+  startAt        DateTime?
+  endLat         Decimal?  @db.Decimal(9, 6)
+  endLng         Decimal?  @db.Decimal(9, 6)
+  endAccuracy    Int?
+  endAt          DateTime?
+  distanceKm     Decimal?  @db.Decimal(10, 3)
+  distanceSource String? // "haversine" | "google"
+
+  completedAt  DateTime?
+  cancelledAt  DateTime?
+  cancelReason String?
+  createdById  String
+  updatedById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  employee  User     @relation("WorkPlanEmployee", fields: [employeeId], references: [id])
+  createdBy User     @relation("WorkPlanCreatedBy", fields: [createdById], references: [id])
+  customer  Contact? @relation("WorkPlanCustomer", fields: [customerId], references: [id])
+  project   Project? @relation(fields: [projectId], references: [id])
+
+  @@index([employeeId, plannedStart])
+  @@index([plannedStart])
+  @@index([projectId])
+  @@map("work_plans")
 }
