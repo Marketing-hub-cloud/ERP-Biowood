@@ -20,6 +20,7 @@ const ENTITY_MENU: Record<string, string> = {
   PurchaseRequest: "purchase.request",
   PurchaseOrder: "purchase.order",
   PurchaseReturn: "purchase.return",
+  EngineerDoc: "engineer.document",
   ApprovalSetting: "settings.approval",
   NoteTemplate: "settings.remark",
   NotificationSetting: "settings.notification",

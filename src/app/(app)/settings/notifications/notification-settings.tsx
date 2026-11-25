@@ -151,7 +151,6 @@ function ModuleCard({
           <CardTitle className="text-base">{m.label}</CardTitle>
           <CardDescription>
             กลุ่ม LINE แนะนำ: &quot;{m.suggestedGroup}&quot;
-            {m.module === "engineer" && " (เริ่มส่งเมื่อมีโมดูลถอดแบบ/ติดตั้ง)"}
           </CardDescription>
         </div>
         <AuditHistory entityType="NotificationSetting" entityId={m.module} />

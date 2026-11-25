@@ -5,6 +5,8 @@ import { storage } from "@/lib/storage";
 export const GET = apiHandler<{ key: string[] }>({}, async ({ params }) => {
   const key = params.key.map(decodeURIComponent).join("/");
   if (key.includes("..")) throw new ApiError(400, "invalid key");
+  // ไฟล์แนบใบถอดแบบ ต้องเปิดผ่าน /api/engineer/documents/[id]/files/[fileId] (ตรวจสิทธิ์เมนู)
+  if (key.startsWith("engineer/")) throw new ApiError(404, "ไม่พบไฟล์");
   const file = await storage.get(key);
   if (!file) throw new ApiError(404, "ไม่พบไฟล์");
   return new Response(new Uint8Array(file.data), {

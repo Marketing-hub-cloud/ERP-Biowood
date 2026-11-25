@@ -3,6 +3,7 @@
 // การส่ง LINE จริงทำโดย worker ภายหลัง (src/lib/notification-worker.ts) ส่งล้มไม่กระทบเอกสาร
 import { APPROVAL_DOC_TYPES, STATUS_LABELS, type ApprovalDocType, type ApprovalSnapshot, type PurchaseStatus } from "./approval";
 import { fullName } from "./format";
+import { ENGINEER_MENU, ENGINEER_STATUS_LABELS, TRANSITIONS, type EngineerStatus } from "./engineer-workflow";
 import type { DbClient, TxClient } from "./db";
 
 export const NOTIFY_MODULES = {
@@ -157,4 +158,111 @@ export async function enqueueLine(tx: TxClient | DbClient, module: NotifyModule,
   if (!setting?.lineEnabled || !setting.lineGroupId) return null;
   const d = await tx.notificationDelivery.create({ data: { module, target: setting.lineGroupId, message, refType: ref.refType ?? null, refId: ref.refId ?? null } });
   return d.id;
+}
+
+// ───────────────────────── ถอดแบบ/ติดตั้ง (เฟส 7) ─────────────────────────
+
+export const engineerLink = (id: string) => `/engineer/documents/${id}`;
+
+export type EngineerEventKind = "created" | "advanced" | "cancelled";
+export type EngineerEvent = {
+  kind: EngineerEventKind;
+  docId: string;
+  docNo: string;
+  projectName: string;
+  /** สถานะหลังเหตุการณ์ */
+  status: EngineerStatus;
+  fromStatus?: EngineerStatus | null;
+  actorId: string | null;
+  actorName?: string | null;
+  comment?: string | null;
+};
+
+/** ขั้นที่รอผู้มีสิทธิ์ "อนุมัติ" กดต่อ */
+const ENGINEER_AWAIT_APPROVE = new Set<EngineerStatus>(TRANSITIONS.filter((t) => t.perm === "approve").map((t) => t.from));
+
+export function engineerLineText(e: EngineerEvent, actorName: string | null): string {
+  const head =
+    e.kind === "created"
+      ? "สร้างเอกสาร"
+      : e.kind === "cancelled"
+        ? "ยกเลิก"
+        : `${ENGINEER_STATUS_LABELS[e.fromStatus ?? "DRAFT"]} → ${ENGINEER_STATUS_LABELS[e.status]}`;
+  const lines = [
+    `[${NOTIFY_MODULES.engineer.label}] ${head}`,
+    `ใบถอดแบบ/ติดตั้ง ${e.docNo} · ${e.projectName}`,
+    `สถานะ: ${ENGINEER_STATUS_LABELS[e.status]}`,
+    `โดย: ${actorName ?? "ระบบ"}`,
+  ];
+  if (e.comment) lines.push(`${e.kind === "cancelled" ? "เหตุผล" : "ความเห็น"}: ${e.comment}`);
+  lines.push(`${appBaseUrl()}${engineerLink(e.docId)}`);
+  return lines.join("\n");
+}
+
+type EngineerRole = "involved" | "assignee" | "approver";
+
+/** ข้อความแจ้งเตือนในระบบ ตามบทบาทผู้รับ */
+export function engineerInAppText(e: EngineerEvent, role: EngineerRole, actorName: string | null): InApp | null {
+  const doc = `ใบถอดแบบ ${e.docNo}`;
+  const by = actorName ? `โดย ${actorName}` : null;
+  if (e.kind === "created") return null;
+  if (e.kind === "cancelled") return { title: `${doc} ถูกยกเลิก`, body: [e.comment ? `เหตุผล: ${e.comment}` : null, by].filter(Boolean).join(" · ") || null };
+  if (role === "assignee") return { title: `คุณได้รับมอบหมายงาน ${doc}`, body: [e.projectName, by].filter(Boolean).join(" · ") };
+  if (role === "approver") return { title: `${doc} รออนุมัติ (${ENGINEER_STATUS_LABELS[e.status]})`, body: [e.projectName, by].filter(Boolean).join(" · ") };
+  return { title: `${doc} → ${ENGINEER_STATUS_LABELS[e.status]}`, body: [e.projectName, by].filter(Boolean).join(" · ") };
+}
+
+/**
+ * แจ้งเตือนเหตุการณ์ใบถอดแบบ/ติดตั้ง (เรียกใน transaction ของเอกสาร)
+ * - ในระบบ: ผู้สร้าง ผู้เกี่ยวข้อง ผู้รับผิดชอบ (ทุกครั้งที่เปลี่ยนขั้น/ยกเลิก),
+ *   ผู้รับผิดชอบได้ข้อความ "ได้รับมอบหมาย" ตอนถึงขั้นมอบหมาย, ขั้นที่รออนุมัติแจ้งผู้มีสิทธิ์ "อนุมัติ" (รวม admin)
+ * - LINE "Biowood - ถอดแบบติดตั้ง": สร้างเอกสาร + ทุกครั้งที่เปลี่ยนขั้น + ยกเลิก
+ */
+export async function enqueueEngineerEvent(tx: TxClient, e: EngineerEvent) {
+  let actorName = e.actorName ?? null;
+  if (actorName === null && e.actorId) {
+    const actor = await tx.user.findUnique({ where: { id: e.actorId }, select: { firstName: true, lastName: true } });
+    actorName = actor ? fullName(actor) : null;
+  }
+  const doc = await tx.engineerDoc.findUnique({
+    where: { id: e.docId },
+    select: { createdById: true, assigneeId: true, participants: { select: { userId: true } } },
+  });
+  if (!doc) return;
+
+  const rows = new Map<string, InApp>();
+  const add = (userId: string | null, text: InApp | null) => {
+    if (userId && text && userId !== e.actorId && !rows.has(userId)) rows.set(userId, text);
+  };
+  if (e.kind !== "created") {
+    // ลำดับสำคัญ: ข้อความเฉพาะบทบาทก่อน (คนเดียวได้ข้อความเดียว)
+    if (e.kind === "advanced" && e.status === "ASSIGNED") add(doc.assigneeId, engineerInAppText(e, "assignee", actorName));
+    if (e.kind === "advanced" && ENGINEER_AWAIT_APPROVE.has(e.status)) {
+      const approvers = await tx.user.findMany({
+        where: {
+          status: "ACTIVE",
+          OR: [
+            { isAdmin: true },
+            { groups: { some: { group: { permissions: { some: { menuKey: ENGINEER_MENU, canView: true, canApprove: true } } } } } },
+          ],
+        },
+        select: { id: true },
+      });
+      for (const u of approvers) add(u.id, engineerInAppText(e, "approver", actorName));
+    }
+    const involved = engineerInAppText(e, "involved", actorName);
+    for (const id of [doc.createdById, doc.assigneeId, ...doc.participants.map((p) => p.userId)]) add(id, involved);
+  }
+  if (rows.size) {
+    const active = new Set(
+      (await tx.user.findMany({ where: { id: { in: [...rows.keys()] }, status: "ACTIVE" }, select: { id: true } })).map((u) => u.id),
+    );
+    await tx.notification.createMany({
+      data: [...rows]
+        .filter(([id]) => active.has(id))
+        .map(([userId, t]) => ({ userId, module: "engineer", title: t.title, body: t.body, link: engineerLink(e.docId), docType: "EN", docId: e.docId })),
+    });
+  }
+
+  await enqueueLine(tx, "engineer", engineerLineText(e, actorName), { refType: "EN", refId: e.docId });
 }

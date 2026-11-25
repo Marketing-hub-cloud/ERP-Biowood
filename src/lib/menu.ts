@@ -14,7 +14,7 @@ export const ACTION_LABELS: Record<PermissionAction, string> = {
 };
 
 const ALL: PermissionAction[] = ["view", "create", "edit", "delete", "cancel"];
-/** เอกสารที่ผ่าน approval engine: มีสิทธิ์ "อนุมัติ" เพิ่ม (ใช้เมื่อไม่ได้ตั้งผังอนุมัติ) */
+/** เอกสารที่มีขั้นอนุมัติ: มีสิทธิ์ "อนุมัติ" เพิ่ม (จัดซื้อ: ใช้เมื่อไม่ได้ตั้งผังอนุมัติ, ถอดแบบ: ขั้นที่ต้องอนุมัติ) */
 const ALL_APPROVE: PermissionAction[] = [...ALL, "approve"];
 const VIEW_ONLY: PermissionAction[] = ["view"];
 const VIEW_EDIT: PermissionAction[] = ["view", "edit"];
@@ -75,7 +75,7 @@ export const MENU: MenuSection[] = [
     label: "ถอดแบบ/ติดตั้ง",
     icon: "engineer",
     items: [
-      { key: "engineer.document", label: "ใบถอดแบบ/ติดตั้ง", href: "/engineer/documents", actions: ALL },
+      { key: "engineer.document", label: "ใบถอดแบบ/ติดตั้ง", href: "/engineer/documents", actions: ALL_APPROVE, ready: true },
     ],
   },
   {

@@ -27,7 +27,7 @@ npm run dev                   # http://localhost:3000
 | `npm run typecheck` | ตรวจ TypeScript |
 | `npm run lint` | ESLint |
 | `npm run test:unit` | unit test (ไม่ใช้ DB) |
-| `npm run test:db` | test กับ DB จริง (เลขที่เอกสาร, stock ledger, จัดซื้อ, แจ้งเตือน) |
+| `npm run test:db` | test กับ DB จริง (เลขที่เอกสาร, stock ledger, จัดซื้อ, แจ้งเตือน, ถอดแบบ/ติดตั้ง) |
 | `npm run test:e2e` | Playwright (ครั้งแรกให้รัน `npx playwright install chromium`) |
 | `npm run db:studio` | เปิด Prisma Studio |
 
@@ -74,6 +74,7 @@ src/lib/
   csv.ts, format.ts  CSV (BOM), วันที่/ตัวเลข
   stock-ledger.ts    นำเข้า/นำออก (lock + movement)
   approval.ts        approval engine (pure)
+  engineer-workflow.ts  state machine ใบถอดแบบ/ติดตั้ง (ขั้น + สิทธิ์ต่อ transition)
   notifications.ts   แจ้งเตือนในระบบ + คิว LINE (outbox)
   notification-worker.ts  worker ส่ง LINE + retry
 src/instrumentation.ts  เริ่ม worker ตอนเซิร์ฟเวอร์เริ่ม

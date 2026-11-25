@@ -2,8 +2,8 @@
 // เฟส 1: Foundation (ผู้ใช้, กลุ่มสิทธิ์, audit log, เลขที่เอกสาร, ข้อมูลบริษัท)
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
   previewFeatures = ["relationJoins"]
 }
 
@@ -56,6 +56,13 @@ model User {
   approvalSteps   ApprovalStepApprover[] @relation("ApprovalStepUser")
   approvalActions ApprovalAction[]       @relation("ApprovalActionActor")
   notifications   Notification[]
+
+  engineerAssigned     EngineerDoc[]         @relation("EngineerAssignee")
+  engineerCreated      EngineerDoc[]         @relation("EngineerCreatedBy")
+  engineerCancelled    EngineerDoc[]         @relation("EngineerCancelledBy")
+  engineerParticipants EngineerParticipant[] @relation("EngineerParticipantUser")
+  engineerFiles        EngineerFile[]        @relation("EngineerFileUploadedBy")
+  engineerStepLogs     EngineerStepLog[]     @relation("EngineerStepActor")
 
   @@map("users")
 }
@@ -229,6 +236,7 @@ model Contact {
   goodsIssues          GoodsIssue[]
   purchaseOrders       PurchaseOrder[]  @relation("PoVendor")
   purchaseReturns      PurchaseReturn[] @relation("RtVendor")
+  engineerDocs         EngineerDoc[]    @relation("EngineerCustomer")
 
   @@index([isCustomer, deletedAt])
   @@index([isVendor, deletedAt])
@@ -448,6 +456,7 @@ model Product {
   prLines         PurchaseRequestLine[]
   poLines         PurchaseOrderLine[]
   rtLines         PurchaseReturnLine[]
+  estimateLines   EngineerEstimateLine[]
 
   @@index([categoryId])
   @@index([name])
@@ -1005,4 +1014,143 @@ model NotificationDelivery {
   @@index([status, nextAttemptAt])
   @@index([createdAt])
   @@map("notification_deliveries")
+}
+
+// ───────────────────────── เฟส 7: ถอดแบบ/ติดตั้ง ─────────────────────────
+
+/// ขั้นของใบถอดแบบ/ติดตั้ง (state machine ดู src/lib/engineer-workflow.ts)
+enum EngineerStatus {
+  DRAFT // 1 ร่าง
+  NEW // 2 งานถอดแบบใหม่
+  REVIEWED // 3 ตรวจสอบแล้ว
+  QUEUED // 4 รับลงคิว
+  ASSIGNED // 5 มอบหมาย
+  IN_PROGRESS // 6 ดำเนินงาน
+  INSPECTION // 7 ตรวจรับงาน
+  ESTIMATE // 8 ใบสรุปประมาณถอดแบบ
+  COMPLETED // 9 เสร็จสิ้น
+  CANCELLED // ยกเลิก
+}
+
+enum EngineerWorkType {
+  SURVEY // ถอดแบบ
+  INSTALL // ติดตั้ง
+  CHANGE // งานเพิ่ม/ลด
+}
+
+enum EngineerUrgency {
+  NORMAL // ทั่วไป
+  URGENT // ด่วน
+}
+
+enum EngineerFileKind {
+  CUSTOMER_DRAWING // แบบจากลูกค้า
+  RETURN_DOC // เอกสารส่งกลับ (ผลงานถอดแบบ)
+}
+
+/// ใบถอดแบบ/ติดตั้ง (EN)
+model EngineerDoc {
+  id            String             @id @default(cuid())
+  docNo         String             @unique
+  status        EngineerStatus     @default(DRAFT)
+  docDate       DateTime           @db.Date // วันที่ออกเอกสาร
+  startDate     DateTime?          @db.Date // วันที่เริ่มงาน
+  dueDate       DateTime?          @db.Date // วันที่กำหนดส่ง
+  revision      Int                @default(1) // ครั้งที่
+  workTypes     EngineerWorkType[]
+  workDetail    String? // ข้อมูลลักษณะงาน
+  projectName   String
+  urgency       EngineerUrgency    @default(NORMAL)
+  customerId    String?
+  addressLabel  String? // ที่อยู่ที่เลือก เช่น "ที่อยู่จดทะเบียน"
+  siteAddress   String? // ข้อความที่อยู่ (คัดลอกจากผู้ติดต่อ แก้ต่อได้)
+  assigneeId    String? // ผู้รับผิดชอบงาน (ขั้น "มอบหมาย")
+  note          String?
+  completedAt   DateTime?
+  cancelledAt   DateTime?
+  cancelledById String?
+  cancelReason  String?
+  createdById   String
+  updatedById   String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  customer      Contact?               @relation("EngineerCustomer", fields: [customerId], references: [id])
+  assignee      User?                  @relation("EngineerAssignee", fields: [assigneeId], references: [id])
+  createdBy     User                   @relation("EngineerCreatedBy", fields: [createdById], references: [id])
+  cancelledBy   User?                  @relation("EngineerCancelledBy", fields: [cancelledById], references: [id])
+  participants  EngineerParticipant[]
+  files         EngineerFile[]
+  estimateLines EngineerEstimateLine[]
+  stepLogs      EngineerStepLog[]
+
+  @@index([status, docDate])
+  @@index([customerId])
+  @@index([assigneeId])
+  @@map("engineer_docs")
+}
+
+/// ผู้เกี่ยวข้อง (หลายคน)
+model EngineerParticipant {
+  docId  String
+  userId String
+
+  doc  EngineerDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  user User        @relation("EngineerParticipantUser", fields: [userId], references: [id])
+
+  @@id([docId, userId])
+  @@index([userId])
+  @@map("engineer_participants")
+}
+
+/// ไฟล์แนบ: แบบจากลูกค้า / เอกสารส่งกลับ
+model EngineerFile {
+  id           String           @id @default(cuid())
+  docId        String
+  kind         EngineerFileKind
+  key          String // storage key
+  fileName     String
+  contentType  String
+  size         Int
+  uploadedById String
+  createdAt    DateTime         @default(now())
+
+  doc        EngineerDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  uploadedBy User        @relation("EngineerFileUploadedBy", fields: [uploadedById], references: [id])
+
+  @@index([docId])
+  @@map("engineer_files")
+}
+
+/// ใบสรุปประมาณถอดแบบ: รายการสินค้าและปริมาณที่ประมาณได้
+model EngineerEstimateLine {
+  id        String  @id @default(cuid())
+  docId     String
+  lineNo    Int
+  productId String
+  quantity  Decimal @db.Decimal(14, 3)
+  note      String?
+
+  doc     EngineerDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  product Product     @relation(fields: [productId], references: [id])
+
+  @@index([docId])
+  @@map("engineer_estimate_lines")
+}
+
+/// ประวัติการเปลี่ยนขั้น (ทุกขั้นมีบันทึก)
+model EngineerStepLog {
+  id         String          @id @default(cuid())
+  docId      String
+  fromStatus EngineerStatus?
+  toStatus   EngineerStatus
+  actorId    String
+  comment    String?
+  createdAt  DateTime        @default(now())
+
+  doc   EngineerDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  actor User        @relation("EngineerStepActor", fields: [actorId], references: [id])
+
+  @@index([docId, createdAt])
+  @@map("engineer_step_logs")
 }

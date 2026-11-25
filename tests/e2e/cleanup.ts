@@ -109,6 +109,18 @@ export async function cleanupTestData(): Promise<Record<string, number>> {
       await c.query(`DELETE FROM approval_actions WHERE "docId" = ANY($1) OR "actorId" = ANY($2)`, [purchaseDocs, users]);
       await c.query(`DELETE FROM approval_step_approvers WHERE "userId" = ANY($1)`, [users]);
       await c.query(`DELETE FROM approval_steps s WHERE NOT EXISTS (SELECT 1 FROM approval_step_approvers a WHERE a."stepId" = s.id)`);
+      // ใบถอดแบบ/ติดตั้ง (เฟส 7): ของผู้ใช้/ลูกค้า/สินค้าทดสอบ หรือชื่อโครงการมี marker
+      const engineerDocs = await ids(
+        c,
+        `SELECT id FROM engineer_docs d WHERE "createdById" = ANY($1) OR "assigneeId" = ANY($1) OR "customerId" = ANY($2) OR "projectName" ILIKE $4
+           OR EXISTS (SELECT 1 FROM engineer_participants p WHERE p."docId" = d.id AND p."userId" = ANY($1))
+           OR EXISTS (SELECT 1 FROM engineer_estimate_lines l WHERE l."docId" = d.id AND l."productId" = ANY($3))`,
+        [users, contacts, products, MARK],
+      );
+      files.push(...(await c.query(`SELECT key FROM engineer_files WHERE "docId" = ANY($1)`, [engineerDocs])).rows.map((r) => r.key));
+      n.engineerDocs = (await c.query(`DELETE FROM engineer_docs WHERE id = ANY($1)`, [engineerDocs])).rowCount ?? 0;
+      purchaseDocs.push(...engineerDocs); // ใช้ลบแจ้งเตือน/คิว LINE/audit ด้านล่างร่วมกัน
+
       n.noteTemplates = (await c.query(`DELETE FROM note_templates WHERE title ILIKE $1 OR body ILIKE $1`, [MARK])).rowCount ?? 0;
       // แจ้งเตือน (เฟส 6): ของเอกสารทดสอบ / ข้อความที่มี marker / กลุ่ม LINE ทดสอบ
       await c.query(`DELETE FROM notifications WHERE "docId" = ANY($1) OR "userId" = ANY($2)`, [purchaseDocs, users]);
@@ -121,7 +133,8 @@ export async function cleanupTestData(): Promise<Record<string, number>> {
           await c.query(`DELETE FROM notifications n WHERE
             (n."docType" = 'PR' AND NOT EXISTS (SELECT 1 FROM purchase_requests WHERE id = n."docId") AND n."docId" <> ALL($1)) OR
             (n."docType" = 'PO' AND NOT EXISTS (SELECT 1 FROM purchase_orders WHERE id = n."docId") AND n."docId" <> ALL($1)) OR
-            (n."docType" = 'RT' AND NOT EXISTS (SELECT 1 FROM purchase_returns WHERE id = n."docId") AND n."docId" <> ALL($1))`, [purchaseDocs])
+            (n."docType" = 'RT' AND NOT EXISTS (SELECT 1 FROM purchase_returns WHERE id = n."docId") AND n."docId" <> ALL($1)) OR
+            (n."docType" = 'EN' AND NOT EXISTS (SELECT 1 FROM engineer_docs WHERE id = n."docId") AND n."docId" <> ALL($1))`, [purchaseDocs])
         ).rowCount ?? 0;
 
       const all = [...users, ...groups, ...contacts, ...products, ...attributes, ...units, ...categories, ...locations, ...receipts, ...issues, ...purchaseDocs];

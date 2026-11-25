@@ -525,3 +525,43 @@ export const notificationSettingSchema = z
   .refine((d) => !d.lineEnabled || d.lineGroupId, { message: "กรุณาระบุกลุ่ม LINE", path: ["lineGroupId"] });
 
 export const markReadSchema = z.object({ ids: z.array(z.string()).max(200).optional(), all: z.boolean().optional() });
+
+// ───────────────────────── เฟส 7: ถอดแบบ/ติดตั้ง ─────────────────────────
+
+export const estimateLineSchema = z.object({
+  productId: z.string({ error: "กรุณาเลือกสินค้า" }).min(1, "กรุณาเลือกสินค้า"),
+  quantity: qty(),
+  note: text(500),
+});
+
+export const engineerDocSchema = z
+  .object({
+    docDate,
+    startDate: optionalDate,
+    dueDate: optionalDate,
+    revision: z.coerce.number({ error: "ครั้งที่ต้องเป็นตัวเลข" }).int("ครั้งที่ต้องเป็นจำนวนเต็ม").min(1, "ครั้งที่ต้องตั้งแต่ 1").max(999),
+    workTypes: z
+      .array(z.enum(["SURVEY", "INSTALL", "CHANGE"]))
+      .min(1, "กรุณาเลือกประเภทงานอย่างน้อย 1 ประเภท")
+      .transform((xs) => [...new Set(xs)]),
+    workDetail: text(2000),
+    projectName: required("ชื่อโครงการ", 255),
+    urgency: z.enum(["NORMAL", "URGENT"]).default("NORMAL"),
+    customerId: text(50),
+    addressLabel: text(200),
+    siteAddress: text(1000),
+    assigneeId: text(50),
+    participantIds: z.array(z.string().min(1)).max(50).default([]).transform((xs) => [...new Set(xs)]),
+    note: text(2000),
+    estimateLines: z.array(estimateLineSchema).max(200, "ไม่เกิน 200 รายการ").default([]),
+  })
+  .refine((d) => !d.startDate || !d.dueDate || d.dueDate >= d.startDate, { message: "วันที่กำหนดส่งต้องไม่ก่อนวันที่เริ่มงาน", path: ["dueDate"] });
+export type EngineerDocInput = z.input<typeof engineerDocSchema>;
+export type EngineerDocData = z.output<typeof engineerDocSchema>;
+
+export const engineerActionSchema = z.object({
+  action: z.enum(["advance", "cancel"]),
+  /** ขั้นที่ผู้ใช้เห็นตอนกด (กันกดซ้ำ/กดพร้อมกัน) */
+  from: z.enum(["DRAFT", "NEW", "REVIEWED", "QUEUED", "ASSIGNED", "IN_PROGRESS", "INSPECTION", "ESTIMATE", "COMPLETED", "CANCELLED"]).optional(),
+  comment: z.string().trim().max(1000).optional().nullable(),
+});

@@ -12,6 +12,8 @@ const nextConfig: NextConfig = {
   },
   experimental: {
     serverActions: { bodySizeLimit: "10mb" },
+    // proxy (src/proxy.ts) buffer body ก่อนส่งต่อ — ไฟล์แนบใบถอดแบบใหญ่ได้ถึง 25MB
+    proxyClientMaxBodySize: "30mb",
   },
 };
 

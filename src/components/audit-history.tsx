@@ -76,6 +76,20 @@ const FIELD_LABEL: Record<string, string> = {
   contact: "ลูกค้า/ผู้ติดต่อ",
   recipientName: "ชื่อผู้รับ",
   shippingAddress: "ที่อยู่จัดส่ง",
+  // ใบถอดแบบ/ติดตั้ง
+  startDate: "วันที่เริ่มงาน",
+  dueDate: "วันที่กำหนดส่ง",
+  revision: "ครั้งที่",
+  workTypes: "ประเภทงาน",
+  workDetail: "ข้อมูลลักษณะงาน",
+  projectName: "ชื่อโครงการ",
+  urgency: "ความเร่งด่วน",
+  customer: "ลูกค้า",
+  siteAddress: "ที่อยู่",
+  assignee: "ผู้รับผิดชอบงาน",
+  participants: "ผู้เกี่ยวข้อง",
+  estimateLines: "ใบสรุปประมาณถอดแบบ",
+  files: "ไฟล์แนบ",
 };
 
 const VALUE_LABEL: Record<string, string> = { ACTIVE: "ใช้งาน", INACTIVE: "หยุดใช้งาน", true: "ใช่", false: "ไม่ใช่" };

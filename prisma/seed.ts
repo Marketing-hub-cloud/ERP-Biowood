@@ -42,6 +42,15 @@ const SAMPLE_GROUPS: { name: string; description: string; permissions: Record<st
     },
   },
   {
+    name: "ถอดแบบ/ติดตั้ง",
+    description: "ฝ่ายถอดแบบ/ติดตั้ง: ใบถอดแบบ/ติดตั้ง (รวมสิทธิ์อนุมัติขั้น ตรวจสอบ/มอบหมาย/ตรวจรับงาน) และดูลูกค้า/สินค้า",
+    permissions: {
+      "engineer.document": ALL_APPROVE,
+      "contacts.customer": VIEW,
+      "inventory.product": VIEW,
+    },
+  },
+  {
     name: "คลังสินค้า",
     description: "ฝ่ายคลัง: สินค้า นำเข้า นำออก",
     permissions: {
