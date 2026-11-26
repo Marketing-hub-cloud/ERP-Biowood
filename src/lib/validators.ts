@@ -3,6 +3,7 @@ import { z } from "zod";
 import { PERMISSION_MENU_KEYS } from "./menu";
 import { MAX_SERIALS_PER_BATCH, parseQty, QTY_DECIMALS } from "./stock-rules";
 import { bangkokLocalToDate } from "./date-input";
+import { isValidMapInput } from "./delivery";
 
 const optionalText = z
   .string()
@@ -650,3 +651,24 @@ export const planActionSchema = z
     message: "ไม่พบพิกัด กรุณาอนุญาตการเข้าถึงตำแหน่ง",
     path: ["lat"],
   });
+
+// ───────────────────────── เฟส 9: ตารางงานพนักงานส่ง ─────────────────────────
+
+export const deliveryJobSchema = z
+  .object({
+    goodsIssueId: z.string({ error: "กรุณาเลือกใบนำออก" }).min(1, "กรุณาเลือกใบนำออก"),
+    startAt: localDateTime("วันเวลาเริ่มจัดส่ง"),
+    endAt: localDateTime("วันเวลาสิ้นสุดจัดส่ง"),
+    driverId: z.string({ error: "กรุณาเลือกพนักงานจัดส่ง" }).min(1, "กรุณาเลือกพนักงานจัดส่ง"),
+    mapUrl: text(1000).refine((v) => v === null || isValidMapInput(v), "กรอกลิงก์ Google Map (https://...) หรือพิกัด เช่น 13.7563,100.5018"),
+    shippingAddress: text(1000),
+    note: text(2000),
+  })
+  .refine((d) => d.endAt >= d.startAt, { message: "วันเวลาสิ้นสุดต้องไม่ก่อนวันเวลาเริ่ม", path: ["endAt"] });
+export type DeliveryJobInput = z.input<typeof deliveryJobSchema>;
+export type DeliveryJobData = z.output<typeof deliveryJobSchema>;
+
+export const deliveryActionSchema = z.object({
+  action: z.enum(["deliver", "cancel"]),
+  reason: z.string().trim().max(500).optional().nullable(),
+});

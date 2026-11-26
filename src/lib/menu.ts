@@ -55,7 +55,7 @@ export const MENU: MenuSection[] = [
     items: [
       { key: "crm.project", label: "โครงการ", href: "/crm/projects", actions: ALL, ready: true },
       { key: "crm.plan", label: "แผนการทำงาน", href: "/crm/plans", actions: ALL, ready: true },
-      { key: "crm.report", label: "รายงาน", href: "/crm/reports", actions: VIEW_ONLY },
+      { key: "crm.report", label: "รายงาน", href: "/crm/reports", actions: VIEW_ONLY, ready: true },
     ],
   },
   {
@@ -66,8 +66,8 @@ export const MENU: MenuSection[] = [
       { key: "inventory.product", label: "สินค้า", href: "/inventory/products", actions: ALL, ready: true },
       { key: "inventory.receipt", label: "นำเข้า", href: "/inventory/receipts", actions: ALL, ready: true },
       { key: "inventory.issue", label: "นำออก", href: "/inventory/issues", actions: ALL, ready: true },
-      { key: "inventory.delivery", label: "ตารางงานพนักงานส่ง", href: "/inventory/deliveries", actions: ALL },
-      { key: "inventory.report", label: "รายงาน", href: "/inventory/reports", actions: VIEW_ONLY },
+      { key: "inventory.delivery", label: "ตารางงานพนักงานส่ง", href: "/inventory/deliveries", actions: ["view", "create", "edit", "cancel"], ready: true },
+      { key: "inventory.report", label: "รายงาน", href: "/inventory/reports", actions: VIEW_ONLY, ready: true },
     ],
   },
   {
@@ -86,7 +86,7 @@ export const MENU: MenuSection[] = [
       { key: "purchase.request", label: "ใบขอซื้อ", href: "/purchase/requests", actions: ALL_APPROVE, ready: true },
       { key: "purchase.order", label: "ใบสั่งซื้อ", href: "/purchase/orders", actions: ALL_APPROVE, ready: true },
       { key: "purchase.return", label: "ใบส่งคืน", href: "/purchase/returns", actions: ALL_APPROVE, ready: true },
-      { key: "purchase.report", label: "รายงาน", href: "/purchase/reports", actions: VIEW_ONLY },
+      { key: "purchase.report", label: "รายงาน", href: "/purchase/reports", actions: VIEW_ONLY, ready: true },
     ],
   },
   {

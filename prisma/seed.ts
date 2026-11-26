@@ -57,7 +57,16 @@ const SAMPLE_GROUPS: { name: string; description: string; permissions: Record<st
       "inventory.product": { view: true, create: true, edit: true },
       "inventory.receipt": ALL,
       "inventory.issue": ALL,
+      "inventory.delivery": { view: true, create: true, edit: true, cancel: true },
       "inventory.report": VIEW,
+    },
+  },
+  {
+    name: "พนักงานจัดส่ง",
+    description: "ดูตารางงานส่งของ และกด \"ส่งแล้ว\" งานของตัวเอง",
+    permissions: {
+      "inventory.delivery": VIEW,
+      "inventory.issue": VIEW,
     },
   },
 ];

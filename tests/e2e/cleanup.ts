@@ -68,6 +68,13 @@ export async function cleanupTestData(): Promise<Record<string, number>> {
                       WHERE l."issueId" = i.id AND (l."productId" = ANY($3) OR rl."receiptId" = ANY($2)))`,
         [users, receipts, products, contacts, MARK],
       );
+      // งานจัดส่ง (ผูกใบนำออก / พนักงานส่งหรือผู้สร้างเป็นผู้ใช้เทส)
+      const deliveries = await ids(
+        c,
+        `SELECT id FROM delivery_jobs WHERE "goodsIssueId" = ANY($1) OR "driverId" = ANY($2) OR "createdById" = ANY($2) OR note ILIKE $3`,
+        [issues, users, MARK],
+      );
+      n.deliveryJobs = (await c.query(`DELETE FROM delivery_jobs WHERE id = ANY($1)`, [deliveries])).rowCount ?? 0;
       n.movements =
         (await c.query(`DELETE FROM stock_movements WHERE "refId" = ANY($1) OR "refId" = ANY($2) OR "productId" = ANY($3)`, [receipts, issues, products])).rowCount ?? 0;
       n.issues = (await c.query(`DELETE FROM goods_issues WHERE id = ANY($1)`, [issues])).rowCount ?? 0;
@@ -98,6 +105,7 @@ export async function cleanupTestData(): Promise<Record<string, number>> {
       const moreReceipts = await ids(c, `SELECT id FROM goods_receipts WHERE "purchaseOrderId" = ANY($1)`, [orders]);
       if (moreIssues.length || moreReceipts.length) {
         await c.query(`DELETE FROM stock_movements WHERE "refId" = ANY($1) OR "refId" = ANY($2)`, [moreIssues, moreReceipts]);
+        await c.query(`DELETE FROM delivery_jobs WHERE "goodsIssueId" = ANY($1)`, [moreIssues]);
         await c.query(`DELETE FROM goods_issues WHERE id = ANY($1)`, [moreIssues]);
         await c.query(`DELETE FROM stock_serials WHERE "receiptLineId" IN (SELECT id FROM goods_receipt_lines WHERE "receiptId" = ANY($1))`, [moreReceipts]);
         await c.query(`DELETE FROM goods_receipts WHERE id = ANY($1)`, [moreReceipts]);
@@ -152,7 +160,7 @@ export async function cleanupTestData(): Promise<Record<string, number>> {
             (n."docType" = 'EN' AND NOT EXISTS (SELECT 1 FROM engineer_docs WHERE id = n."docId") AND n."docId" <> ALL($1))`, [purchaseDocs])
         ).rowCount ?? 0;
 
-      const all = [...users, ...groups, ...contacts, ...products, ...attributes, ...units, ...categories, ...locations, ...receipts, ...issues, ...purchaseDocs];
+      const all = [...users, ...groups, ...contacts, ...products, ...attributes, ...units, ...categories, ...locations, ...receipts, ...issues, ...deliveries, ...purchaseDocs];
       n.auditLogs = (await c.query(`DELETE FROM audit_logs WHERE "entityId" = ANY($1) OR "actorId" = ANY($2)`, [all, users])).rowCount ?? 0;
       n.products = (await c.query(`DELETE FROM products WHERE id = ANY($1)`, [products])).rowCount ?? 0;
       await c.query(`DELETE FROM product_attribute_values WHERE "attributeId" = ANY($1)`, [attributes]);

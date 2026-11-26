@@ -11,6 +11,7 @@ import { pathLabel, type TreeNode } from "@/lib/tree";
 import type { IssueData } from "@/lib/validators";
 import type { CurrentUser } from "@/lib/session";
 import { kickNotificationWorker } from "@/lib/notification-worker";
+import { cancelDeliveriesOfIssue } from "./deliveries";
 import type { Prisma } from "@/generated/prisma/client";
 
 export const ENTITY_ISSUE = "GoodsIssue";
@@ -235,6 +236,8 @@ async function cancelIssueTx(actor: CurrentUser, id: string, reason: string, ip:
       note: `${res.wasPosted ? "ยกเลิกและคืนสต๊อก" : "ยกเลิกร่าง"}: ${reason}`,
       ip,
     });
+    const doc = await tx.goodsIssue.findUniqueOrThrow({ where: { id }, select: { docNo: true } });
+    await cancelDeliveriesOfIssue(tx, id, doc.docNo, actor.id, ip);
   }, STOCK_TX);
 }
 

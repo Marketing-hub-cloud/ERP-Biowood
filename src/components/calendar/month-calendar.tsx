@@ -14,6 +14,8 @@ export type CalendarEvent = {
   href: string;
   className?: string;
   muted?: boolean;
+  /** บรรทัดรอง (มุมมองสัปดาห์/วัน) */
+  subtitle?: string;
 };
 
 const WEEKDAYS = ["จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส.", "อา."];
@@ -47,19 +49,10 @@ export function MonthCalendar({
   today: string;
   loading?: boolean;
 }) {
-  const days = monthGrid(year, month);
-  const byDay = new Map<string, CalendarEvent[]>();
-  for (const e of events) {
-    const s = bkkDay(e.start);
-    const en = bkkDay(e.end) < s ? s : bkkDay(e.end);
-    for (const d of days) if (d >= s && d <= en) byDay.set(d, [...(byDay.get(d) ?? []), e]);
-  }
   const shift = (n: number) => {
     const d = new Date(Date.UTC(year, month + n, 1));
     onMonthChange(d.getUTCFullYear(), d.getUTCMonth());
   };
-  const ym = `${year}-${String(month + 1).padStart(2, "0")}`;
-
   return (
     <div className="rounded-lg border bg-card" data-testid="month-calendar">
       <div className="flex items-center gap-2 border-b p-2">
@@ -85,6 +78,30 @@ export function MonthCalendar({
         </h2>
         {loading && <span className="text-xs text-muted-foreground">กำลังโหลด...</span>}
       </div>
+      <MonthGrid year={year} month={month} events={events} today={today} />
+    </div>
+  );
+}
+
+/** จัด event ลงวัน (event หลายวันอยู่ทุกวันที่ครอบคลุม) */
+export function eventsByDay(events: CalendarEvent[], days: string[]): Map<string, CalendarEvent[]> {
+  const byDay = new Map<string, CalendarEvent[]>();
+  const sorted = [...events].sort((a, b) => a.start.localeCompare(b.start));
+  for (const e of sorted) {
+    const s = bkkDay(e.start);
+    const en = bkkDay(e.end) < s ? s : bkkDay(e.end);
+    for (const d of days) if (d >= s && d <= en) byDay.set(d, [...(byDay.get(d) ?? []), e]);
+  }
+  return byDay;
+}
+
+/** ตารางเดือน (ไม่มีแถบเครื่องมือ) */
+export function MonthGrid({ year, month, events, today }: { year: number; month: number; events: CalendarEvent[]; today: string }) {
+  const days = monthGrid(year, month);
+  const byDay = eventsByDay(events, days);
+  const ym = `${year}-${String(month + 1).padStart(2, "0")}`;
+  return (
+    <>
       <div className="grid grid-cols-7 border-b text-center text-xs text-muted-foreground">
         {WEEKDAYS.map((w) => (
           <div key={w} className="py-1">
@@ -118,6 +135,6 @@ export function MonthCalendar({
           );
         })}
       </div>
-    </div>
+    </>
   );
 }

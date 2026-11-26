@@ -58,6 +58,8 @@ model User {
   notifications   Notification[]
 
   engineerAssigned     EngineerDoc[]         @relation("EngineerAssignee")
+  deliveriesDriven     DeliveryJob[]         @relation("DeliveryDriver")
+  deliveriesCreated    DeliveryJob[]         @relation("DeliveryCreatedBy")
   engineerCreated      EngineerDoc[]         @relation("EngineerCreatedBy")
   engineerCancelled    EngineerDoc[]         @relation("EngineerCancelledBy")
   engineerParticipants EngineerParticipant[] @relation("EngineerParticipantUser")
@@ -637,6 +639,7 @@ model GoodsIssue {
   cancelledBy    User?            @relation("IssueCancelledBy", fields: [cancelledById], references: [id])
   lines          GoodsIssueLine[]
   purchaseReturn PurchaseReturn?  @relation(fields: [purchaseReturnId], references: [id])
+  deliveries     DeliveryJob[]
 
   @@index([status, docDate])
   @@index([contactId])
@@ -1287,4 +1290,41 @@ model WorkPlan {
   @@index([plannedStart])
   @@index([projectId])
   @@map("work_plans")
+}
+
+// ───────────────────────── เฟส 9: ตารางงานพนักงานส่ง ─────────────────────────
+
+enum DeliveryJobStatus {
+  SCHEDULED // นัดส่ง
+  DELIVERED // ส่งแล้ว
+  CANCELLED // ยกเลิก
+}
+
+/// งานจัดส่ง (ผูกกับใบนำออก — 1 ใบนำออกมีได้หลายเที่ยว)
+model DeliveryJob {
+  id              String            @id @default(cuid())
+  goodsIssueId    String
+  status          DeliveryJobStatus @default(SCHEDULED)
+  startAt         DateTime
+  endAt           DateTime
+  driverId        String
+  mapUrl          String? // ลิงก์ Google Map หรือพิกัด "lat,lng"
+  shippingAddress String?
+  note            String?
+  deliveredAt     DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  createdById     String
+  updatedById     String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  goodsIssue GoodsIssue @relation(fields: [goodsIssueId], references: [id])
+  driver     User       @relation("DeliveryDriver", fields: [driverId], references: [id])
+  createdBy  User       @relation("DeliveryCreatedBy", fields: [createdById], references: [id])
+
+  @@index([driverId, startAt])
+  @@index([startAt])
+  @@index([goodsIssueId])
+  @@map("delivery_jobs")
 }

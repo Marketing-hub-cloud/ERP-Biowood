@@ -23,6 +23,7 @@ const ENTITY_MENU: Record<string, string> = {
   EngineerDoc: "engineer.document",
   Project: "crm.project",
   WorkPlan: "crm.plan",
+  DeliveryJob: "inventory.delivery",
   ApprovalSetting: "settings.approval",
   NoteTemplate: "settings.remark",
   NotificationSetting: "settings.notification",

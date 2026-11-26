@@ -27,7 +27,7 @@ npm run dev                   # http://localhost:3000
 | `npm run typecheck` | ตรวจ TypeScript |
 | `npm run lint` | ESLint |
 | `npm run test:unit` | unit test (ไม่ใช้ DB) |
-| `npm run test:db` | test กับ DB จริง (เลขที่เอกสาร, stock ledger, จัดซื้อ, แจ้งเตือน, ถอดแบบ/ติดตั้ง, CRM) |
+| `npm run test:db` | test กับ DB จริง (เลขที่เอกสาร, stock ledger, จัดซื้อ, แจ้งเตือน, ถอดแบบ/ติดตั้ง, CRM, งานจัดส่ง + รายงาน) |
 | `npm run test:e2e` | Playwright (ครั้งแรกให้รัน `npx playwright install chromium`) |
 | `npm run db:studio` | เปิด Prisma Studio |
 

@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/page-header";
 import { AuditHistory } from "@/components/audit-history";
 import { DocStatusBadge } from "../../_components/doc-status-badge";
 import { IssueForm } from "../issue-form";
+import { IssueDeliveries } from "../issue-deliveries";
 
 export default async function IssueDetailPage({ params }: PageProps<"/inventory/issues/[id]">) {
   const { id } = await params;
@@ -65,6 +66,9 @@ export default async function IssueDetailPage({ params }: PageProps<"/inventory/
           },
         }}
       />
+      {can(user.permissions, "inventory.delivery", "view") && (
+        <IssueDeliveries issueId={d.id} canCreate={d.status !== "CANCELLED" && can(user.permissions, "inventory.delivery", "create")} />
+      )}
     </>
   );
 }
