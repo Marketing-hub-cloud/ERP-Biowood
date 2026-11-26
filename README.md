@@ -27,9 +27,13 @@ npm run dev                   # http://localhost:3000
 | `npm run typecheck` | ตรวจ TypeScript |
 | `npm run lint` | ESLint |
 | `npm run test:unit` | unit test (ไม่ใช้ DB) |
-| `npm run test:db` | test กับ DB จริง (เลขที่เอกสาร, stock ledger, จัดซื้อ, แจ้งเตือน, ถอดแบบ/ติดตั้ง, CRM, งานจัดส่ง + รายงาน) |
+| `npm run test:db` | test กับ DB จริง (เลขที่เอกสาร, stock ledger, จัดซื้อ, แจ้งเตือน, ถอดแบบ/ติดตั้ง, CRM, งานจัดส่ง + รายงาน, import) |
 | `npm run test:e2e` | Playwright (ครั้งแรกให้รัน `npx playwright install chromium`) |
 | `npm run db:studio` | เปิด Prisma Studio |
+| `npm run import -- <ชนิด> <ไฟล์.csv> [--commit]` | นำเข้าข้อมูลเก่าจาก CSV — ดู [docs/IMPORT.md](docs/IMPORT.md) |
+| `npm run build` | build production (standalone) |
+
+**Production**: VPS + Docker Compose + Caddy (HTTPS) — ดู [docs/DEPLOY.md](docs/DEPLOY.md)
 
 > หลัง `npm run db:migrate` / `prisma generate` ให้รีสตาร์ท `npm run dev` ถ้ายังเจอ error แปลกๆ เช่น
 > `Cannot read properties of undefined (reading 'count')` แปลว่า dev server ยังใช้ Prisma client เก่าใน cache ให้ลบโฟลเดอร์ `.next` แล้วรันใหม่

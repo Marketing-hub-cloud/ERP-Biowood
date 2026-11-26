@@ -71,6 +71,9 @@ const SAMPLE_GROUPS: { name: string; description: string; permissions: Record<st
   },
 ];
 
+/** ข้อมูลตัวอย่าง (ผู้ติดต่อ, คลัง, หมวดหมู่, คุณสมบัติ, สินค้า, ใบนำเข้า/นำออก) — production ตั้ง SEED_SAMPLE_DATA=false */
+const SAMPLE = process.env.SEED_SAMPLE_DATA !== "false";
+
 async function main() {
   const email = (process.env.SEED_ADMIN_EMAIL ?? "admin@biowood.local").toLowerCase();
   const password = process.env.SEED_ADMIN_PASSWORD;
@@ -130,7 +133,7 @@ async function main() {
   console.log("✔ ตัวเลือกช่องทางที่รู้จัก / ประเภทกิจการของลูกค้า / ขั้นตอนและลักษณะงานของโครงการ");
 
   // ผู้ติดต่อตัวอย่าง (สร้างเฉพาะครั้งแรก)
-  if ((await prisma.contact.count()) === 0) {
+  if (SAMPLE && (await prisma.contact.count()) === 0) {
     const lookup = async (kind: keyof typeof LOOKUPS, label: string) =>
       (await prisma.lookupOption.findUniqueOrThrow({ where: { kind_label: { kind, label } } })).id;
     const tag = async (name: string) => (await prisma.tag.upsert({ where: { name }, update: {}, create: { name } })).id;
@@ -212,7 +215,7 @@ async function main() {
   }
   console.log("✔ เหตุผลการส่งคืน");
 
-  if ((await prisma.stockLocation.count()) === 0) {
+  if (SAMPLE && (await prisma.stockLocation.count()) === 0) {
     const wh = await prisma.stockLocation.create({ data: { level: 0, code: "WH1", name: "คลังหลัก" } });
     const zone = await prisma.stockLocation.create({ data: { parentId: wh.id, level: 1, code: "A", name: "โซน A" } });
     const shelf = await prisma.stockLocation.create({ data: { parentId: zone.id, level: 2, code: "A-1", name: "ชั้น 1" } });
@@ -220,7 +223,7 @@ async function main() {
     console.log("✔ คลังหลัก (WH1) > โซน A > ชั้น 1 > ช่อง 01");
   }
 
-  if ((await prisma.productCategory.count()) === 0) {
+  if (SAMPLE && (await prisma.productCategory.count()) === 0) {
     const tree: [string, [string, string[]][]][] = [
       ["พื้น", [["พื้นไม้คอมโพสิต", ["ลายไม้", "ผิวเรียบ"]]]],
       ["ผนัง", [["ผนังตกแต่ง", []]]],
@@ -237,7 +240,7 @@ async function main() {
     console.log("✔ หมวดหมู่สินค้าตัวอย่าง");
   }
 
-  if ((await prisma.productAttribute.count()) === 0) {
+  if (SAMPLE && (await prisma.productAttribute.count()) === 0) {
     await prisma.productAttribute.createMany({
       data: [
         { name: "ขนาด", dataType: "TEXT", sortOrder: 0 },
@@ -248,7 +251,7 @@ async function main() {
     console.log("✔ คุณสมบัติตัวอย่าง: ขนาด / ความยาว / สี");
   }
 
-  if ((await prisma.product.count()) === 0) {
+  if (SAMPLE && (await prisma.product.count()) === 0) {
     const find = {
       type: async (label: string) => (await prisma.lookupOption.findUniqueOrThrow({ where: { kind_label: { kind: "PRODUCT_TYPE", label } } })).id,
       unit: async (name: string) => (await prisma.unit.findUniqueOrThrow({ where: { name } })).id,
@@ -285,7 +288,7 @@ async function main() {
   }
 
   // ใบนำเข้า/นำออกตัวอย่าง (เฉพาะเมื่อยังไม่มีเอกสารคลังเลย และมีข้อมูลตัวอย่างครบ)
-  if ((await prisma.goodsReceipt.count()) === 0) {
+  if (SAMPLE && (await prisma.goodsReceipt.count()) === 0) {
     const [admin, deck, clip, bin] = await Promise.all([
       prisma.user.findUnique({ where: { email } }),
       prisma.product.findFirst({ where: { code: "BW-DK-145-BR", deletedAt: null, isStockable: true } }),
@@ -318,7 +321,7 @@ async function main() {
   }
 
   // ใบนำออกตัวอย่าง: เบิกตัวอย่าง 3 แผ่นจาก SN แรกของใบนำเข้าตัวอย่าง (เฉพาะเมื่อยังไม่มีใบนำออกเลย)
-  if ((await prisma.goodsIssue.count()) === 0) {
+  if (SAMPLE && (await prisma.goodsIssue.count()) === 0) {
     const [admin, first] = await Promise.all([
       prisma.user.findUnique({ where: { email } }),
       prisma.stockSerial.findFirst({

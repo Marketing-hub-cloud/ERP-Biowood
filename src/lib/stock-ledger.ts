@@ -49,7 +49,8 @@ export function isInWarehouse(nodes: TreeNode[], locationId: string, warehouseId
 
 // ───────────── นำเข้า ─────────────
 
-export async function postReceipt(tx: TxClient, receiptId: string, actorId: string) {
+/** occurredAt = วันเวลาที่มีผลของ movement (ค่าเริ่มต้น = ตอนนี้; ใช้กับยอดยกมาที่นำเข้าย้อนวันที่ตัดยอด) */
+export async function postReceipt(tx: TxClient, receiptId: string, actorId: string, opts: { occurredAt?: Date } = {}) {
   assertDraft(await lockDoc(tx, "goods_receipts", receiptId));
   const r = await tx.goodsReceipt.findUniqueOrThrow({
     where: { id: receiptId },
@@ -100,7 +101,7 @@ export async function postReceipt(tx: TxClient, receiptId: string, actorId: stri
         refId: r.id,
         refLineId: l.id,
         refDocNo: r.docNo,
-        occurredAt: now,
+        occurredAt: opts.occurredAt ?? now,
         createdById: actorId,
       })),
     });

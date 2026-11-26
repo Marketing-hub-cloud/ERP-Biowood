@@ -57,6 +57,8 @@ async function snapshot(tx: TxClient, id: string) {
     }),
   };
 }
+/** snapshot สำหรับ audit (ใช้กับสคริปต์ import ยอดยกมา) */
+export const receiptSnapshot = snapshot;
 
 /** ประเภทสั่งซื้อ: PO ต้องอนุมัติแล้วและยังรับไม่ครบ (ใบเดิมที่อ้าง PO นี้อยู่แล้วแก้ต่อได้) และทุกรายการมาจาก PO นี้ */
 async function assertOrderLines(tx: TxClient, d: ReceiptData, currentOrderId?: string | null) {

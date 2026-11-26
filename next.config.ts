@@ -15,6 +15,9 @@ const devOrigins = [
 ];
 
 const nextConfig: NextConfig = {
+  // production (Docker): build เป็น .next/standalone รันด้วย `node server.js` (ดู Dockerfile)
+  output: "standalone",
+  poweredByHeader: false,
   allowedDevOrigins: devOrigins,
   turbopack: {
     rules: {

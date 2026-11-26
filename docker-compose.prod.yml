@@ -1,0 +1,64 @@
+# Production บน VPS: Caddy (HTTPS อัตโนมัติ) → app (Next.js) — ฐานข้อมูลอยู่ที่ Supabase
+# ดูขั้นตอนทั้งหมดที่ docs/DEPLOY.md
+#
+#   docker compose -f docker-compose.prod.yml up -d --build      ติดตั้ง/อัปเดต (migrate อัตโนมัติก่อนแอปเริ่ม)
+#   docker compose -f docker-compose.prod.yml logs -f app        ดู log
+#   docker compose -f docker-compose.prod.yml run --rm tools npm run db:seed
+#   docker compose -f docker-compose.prod.yml run --rm -v ./data:/app/data tools npm run import -- contacts data/contacts.csv
+name: biowood-erp
+
+services:
+  # รัน migration ทุกครั้งที่ deploy แล้วจบ (แอปเริ่มหลัง migrate สำเร็จเท่านั้น)
+  migrate:
+    build: { context: ., target: tools }
+    image: biowood-erp-tools
+    env_file: .env.production
+    restart: "no"
+
+  # ใช้สั่ง seed / import ด้วย `run --rm tools ...` (ไม่รันค้าง)
+  tools:
+    image: biowood-erp-tools
+    env_file: .env.production
+    profiles: ["tools"]
+    volumes:
+      - uploads:/data/uploads
+
+  app:
+    build: { context: ., target: runner }
+    image: biowood-erp-app
+    env_file: .env.production
+    environment:
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    expose:
+      - "3000"
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "5" } }
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?ตั้ง DOMAIN ในไฟล์ .env (โดเมนของระบบ เช่น erp.biowood.co.th)}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "5" } }
+
+volumes:
+  # ไฟล์แนบ/รูปภาพ — ต้องสำรองข้อมูล (ดู docs/DEPLOY.md)
+  uploads:
+  caddy_data:
+  caddy_config:

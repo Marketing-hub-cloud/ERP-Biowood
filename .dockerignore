@@ -1,0 +1,16 @@
+.git
+node_modules
+.next
+uploads
+data
+test-results
+playwright-report
+coverage
+src/generated
+.env
+.env.*
+!.env.example
+!.env.production.example
+*.log
+*.png
+!public/**
